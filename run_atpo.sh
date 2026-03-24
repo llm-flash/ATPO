@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH -J atpo_qwen3_4B
-#SBATCH --partition=short
+#SBATCH --partition=2xlong
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=48
-#SBATCH -t 4:00:00
+#SBATCH -t 24:00:00
 #SBATCH -o slurm-%x-%j.out
 #SBATCH -e slurm-%x-%j.err
 #SBATCH --mem=200G
