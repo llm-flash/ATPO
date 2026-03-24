@@ -5,24 +5,9 @@ cd "$PARENT_DIR"
 echo "Switched to parent directory: $PARENT_DIR"
 
 # ============================ Environment Setting ============================
-export NCCL_PRIMS_PROFILE_ENABLE=0
-export NCCL_IB_GID_INDEX=3
-export NCCL_IB_SL=3
-export NCCL_CHECK_DISABLE=1
-export NCCL_P2P_DISABLE=0
-export NCCL_IB_DISABLE=0
-export NCCL_LL_THRESHOLD=16384
-export NCCL_IB_CUDA_SUPPORT=1
-export NCCL_SOCKET_IFNAME=bond1
-export UCX_NET_DEVICES=bond1
-export NCCL_IB_HCA=mlx5_bond_1,mlx5_bond_5,mlx5_bond_3,mlx5_bond_7,mlx5_bond_4,mlx5_bond_8,mlx5_bond_2,mlx5_bond_6
-export NCCL_COLLNET_ENABLE=0
-export SHARP_COLL_ENABLE_SAT=0
-export NCCL_NET_GDR_LEVEL=2
-export NCCL_IB_QPS_PER_CONNECTION=4
-export NCCL_IB_TC=160
-export NCCL_PXN_DISABLE=0
 export NCCL_DEBUG="WARN"
+export NCCL_P2P_DISABLE=0
+export NCCL_IB_DISABLE=1
 export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 # Set basic environment variables
@@ -65,12 +50,12 @@ MAX_RESPONSE_LENGTH=6192           # Maximum response length
 #TRAIN_FILES="${PARENT_DIR}/../ARPO/rl_datasets/train_10k.parquet"
 #VALID_FILES=["${PARENT_DIR}/../ARPO/rl_datasets/valid.parquet"]
 
-TRAIN_FILES="path/to/your/train.parquet"
-VALID_FILES=["path/to/your/test.parquet"]
+TRAIN_FILES="/scratch/user/debajoym98_tamu.edu/ATPO/rl_datasets/hotpotqa/train.parquet"
+VALID_FILES=["/scratch/user/debajoym98_tamu.edu/ATPO/rl_datasets/hotpotqa/test_512.parquet"]
 
 # ============================ Model Configuration ============================
 # Actor model path
-ACTOR_MODEL_PATH="xxxxx"
+ACTOR_MODEL_PATH="/scratch/user/debajoym98_tamu.edu/ATPO/models/Qwen3-4B"
 
 # ============================ Rollout Configuration ==========================
 # Rollout settings
@@ -86,6 +71,19 @@ BEAM_SIZE=6                        # Beam size
 SAMPLES_PER_TREE=22                  # Number of samples per tree
 ROLLOUT_N=$SAMPLES_PER_TREE          # Number of responses generated per sample
 
+# ============================ Feature Flags ============================
+ENABLE_ENTROPY_BALANCED_CLIPPING=False
+ENABLE_ENTROPY_BALANCED_ADVANTAGE=False
+ENABLE_DYNAMIC_ROLLOUTS=False
+ENABLE_MULTI_TURN=True
+TOOL_CONFIG_PATH="${PARENT_DIR}/verl_atpo/examples/sglang_multiturn/config/tool_config/search_tool_config.yaml"
+
+# ============================ Search Tool Configuration ==========================
+# The search tool calls the local RAG server (http://127.0.0.1:8000/retrieve)
+# instead of Brightdata. api_key is required by the constructor but unused.
+SEARCH_CACHE_PATH="/scratch/user/debajoym98_tamu.edu/ATPO/search_cache/search_cache.json"
+API_KEY="unused_local_rag_server"
+
 # ============================ Reward Model Configuration ==========================
 # Reward model settings
 REWARD_MANAGER="naive"              # Reward manager type
@@ -94,14 +92,14 @@ CUSTOM_REWARD_FUNCTION_NAME="compute_score"
 
 # ============================ Training Configuration ============================
 # Training parameters
-TOTAL_EPOCHS=5                      # Total training epochs
+TOTAL_EPOCHS=1                     # Total training epochs
 SAVE_FREQ=50                        # Save frequency
 TEST_FREQ=20                        # Test frequency
 
 # ============================ Path Configuration ============================
 # Save path
 CURRENT_DATE=$(date +%Y%m%d_%H%M%S)
-SAVE_PATH="/mnt/private/logs/AEPO/${EXPERIMENT_NAME}/${CURRENT_DATE}/"
+SAVE_PATH="/scratch/user/debajoym98_tamu.edu/ATPO/logs/${EXPERIMENT_NAME}/${CURRENT_DATE}/"
 ROLLOUT_SAVE_PATH="${SAVE_PATH}/rollout"
 VALIDATION_SAVE_PATH="${SAVE_PATH}/validation"
 
@@ -179,6 +177,7 @@ python3 -m verl.trainer.main_ppo \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.cache_file=${SEARCH_CACHE_PATH} \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.api_key=${API_KEY} \
     actor_rollout_ref.rollout.multi_turn.enable=${ENABLE_MULTI_TURN} \
+    actor_rollout_ref.rollout.multi_turn.tool_config_path=${TOOL_CONFIG_PATH} \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=$((4*(MAX_PROMPT_LENGTH+MAX_RESPONSE_LENGTH))) \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     reward_model.reward_manager=${REWARD_MANAGER} \
@@ -194,8 +193,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.test_freq=${TEST_FREQ} \
     trainer.total_epochs=${TOTAL_EPOCHS} \
     trainer.default_local_dir=${SAVE_PATH} \
-    trainer.val_before_train=False \
+    trainer.val_before_train=True \
     trainer.rollout_data_dir=${ROLLOUT_SAVE_PATH} \
     trainer.validation_data_dir=${VALIDATION_SAVE_PATH} \
-    hydra.run.dir=${SAVE_PATH}/outputs 2>&1 | tee ${SAVE_PATH}/run.log 
-    
+    ray_init.num_cpus=null \
+    hydra.run.dir=${SAVE_PATH}/outputs 2>&1 | tee ${SAVE_PATH}/run.log

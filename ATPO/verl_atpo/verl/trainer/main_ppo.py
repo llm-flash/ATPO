@@ -32,11 +32,16 @@ def main(config):
 
 def run_ppo(config) -> None:
     if not ray.is_initialized():
-        # this is for local ray cluster
-        ray.init(
+        import os
+        ray_kwargs = dict(
             runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN", "VLLM_ALLOW_RUNTIME_LORA_UPDATING": "true"}},
             num_cpus=config.ray_init.num_cpus,
+            include_dashboard=False,
         )
+        ray_tmpdir = os.environ.get("RAY_TMPDIR")
+        if ray_tmpdir:
+            ray_kwargs["_temp_dir"] = ray_tmpdir
+        ray.init(**ray_kwargs)
 
     runner = TaskRunner.remote()
     ray.get(runner.run.remote(config))
