@@ -6,10 +6,10 @@
 
 nvcc --version
 
-file_path=/path/to/your/data
+file_path=/scratch/user/debajoym98_tamu.edu/ATPO/rag_data
 index_file=$file_path/e5_Flat.index
 corpus_file=$file_path/wiki-18.jsonl
-retriever=/path/to/your/retriever_model
+retriever=intfloat/e5-base-v2
 
 python3 rag_server/retrieval_server.py --index_path $index_file \
                                             --corpus_path $corpus_file \

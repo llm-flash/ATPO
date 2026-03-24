@@ -360,11 +360,12 @@ def retrieve_endpoint(request: QueryRequest):
         request.topk = config.retrieval_topk  # fallback to default
 
     # Perform batch retrieval
-    results, scores = retriever.batch_search(
+    raw = retriever.batch_search(
         query_list=request.queries,
         num=request.topk,
-        return_score=request.return_scores
+        return_score=True
     )
+    results, scores = raw
     
     # Format response
     resp = []
@@ -383,4 +384,4 @@ def retrieve_endpoint(request: QueryRequest):
 if __name__ == "__main__":
     # 3) Launch the server. By default, it listens on http://127.0.0.1:5003
     print('开始启动服务')
-    uvicorn.run(app, host="0.0.0.0", port=5003)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
