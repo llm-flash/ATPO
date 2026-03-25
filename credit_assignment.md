@@ -480,6 +480,49 @@ All set via hydra overrides in `ATPO_qwen3_4B.sh`:
 
 ---
 
+## Configuration: Entropy Branching Only (No Fancy Credit Assignment)
+
+If you want to keep **entropy-based tree expansion** but use **standard GRPO outcome-level advantages** (no tree value propagation, no softmax weighting, no per-node advantages), change **one line** in `ATPO_qwen3_4B.sh`:
+
+```
+actor_rollout_ref.rollout.node_adv_mode=vanilla
+```
+
+### What this does
+
+When `node_adv_mode=vanilla`, the code at line 1680 of `vllm_rollout_with_tools_tree_offline.py` takes a completely different path:
+
+- **Skips** leaf value normalization (leaf_value_norm is ignored)
+- **Skips** bottom-up value propagation (node_value_mode is ignored)
+- **Skips** node advantage computation
+- **Skips** token-level advantage mapping from tree structure
+- **Instead** uses standard GRPO: `token_level_scores = reward_tensor`, then calls `compute_advantage()` with the GRPO estimator (group-relative outcome advantage)
+
+### What stays the same
+
+- Entropy-based branching still works (`expansion_mode=entropy`)
+- Tree is still built with 10 initial rollouts, 2 expansion rounds, 22 sampled leaves
+- Multi-turn tool calling still works
+- GSPO-turn policy loss still works
+- The tree structure provides **diverse trajectories** — just the advantage signal is flat (same advantage for all tokens in a trajectory, like vanilla GRPO)
+
+### Config diff (only 1 change needed)
+
+```diff
+- actor_rollout_ref.rollout.node_adv_mode=node_value
++ actor_rollout_ref.rollout.node_adv_mode=vanilla
+```
+
+The `leaf_value_norm` and `node_value_mode` settings can stay as-is — they're simply ignored when `node_adv_mode=vanilla`.
+
+### Why you might want this
+
+- **Simpler baseline**: isolate the effect of entropy branching from credit assignment
+- **Fewer moving parts**: standard GRPO advantage is well-understood
+- **Faster debugging**: if training is unstable, rule out credit assignment as the cause
+
+---
+
 ## Experiment Checklist for Ablation Studies
 
 When running credit assignment ablations, change **one knob at a time** and compare:
