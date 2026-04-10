@@ -634,6 +634,7 @@ class vLLMRolloutWithTools(vLLMRollout):
         self.expansion_iterations = self.config.expansion_iterations
         self.branch_probability = self.config.branch_probability
         self.entropy_weight = self.config.entropy_weight
+        self.adv_entropy_alpha = self.config.get('adv_entropy_alpha', 0.0)
         # Total outputs per input sample = samples_per_tree (samples from the tree)
         # Each input has 1 root with initial_rollouts initial branches, then expanded, then sampled
         assert self.config.n == self.samples_per_tree
@@ -1810,12 +1811,33 @@ class vLLMRolloutWithTools(vLLMRollout):
                         all_descendants = root.get_subtree_nodes()
                         for node in all_descendants:
                             node.advantage = (node.value - root.value) + (node.value - node.parent_node.value)
+                elif self.node_adv_mode == 'entropy_weighted':
+                    alpha = self.adv_entropy_alpha
+                    print(f"Computing node advantages using entropy_weighted mode (alpha={alpha})...")
+                    for root in root_nodes:
+                        root.advantage = root.value
+                        all_descendants = root.get_subtree_nodes()
+                        for node in all_descendants:
+                            diff = node.value - node.parent_node.value
+                            node.advantage = node.value + alpha * node.entropy * diff
                 else:
                     raise ValueError(f"Unsupported node_adv_mode: {self.node_adv_mode}")
                 
 
                 # step 4: Compute token-level scores and advantages from leaf nodes
                 print("Computing token-level scores and advantages from leaf nodes...")
+                
+                # Compute sharing counts: how many collected leaves pass through each node.
+                # Shared prefix nodes (e.g. root shared by all 22 leaves) would otherwise
+                # have their gradient contribution amplified N-fold during loss.backward().
+                # Dividing by the sharing count ensures each node's total gradient equals
+                # its advantage exactly once, regardless of how many leaves traverse it.
+                node_sharing_counts = {}
+                for leaf_node in collected_leaf_nodes:
+                    current = leaf_node
+                    while current is not None:
+                        node_sharing_counts[current.node_uid] = node_sharing_counts.get(current.node_uid, 0) + 1
+                        current = current.parent_node
                 
                 # Initialize token-level tensors with zeros
                 batch_size = len(collected_leaf_nodes)
@@ -1849,11 +1871,11 @@ class vLLMRolloutWithTools(vLLMRollout):
                             start_idx = parent_len
                             end_idx = min(node_len, response_length)
                             
-                            # Assign node's value and advantage to these tokens
+                            sharing_count = node_sharing_counts.get(node.node_uid, 1)
                             token_level_scores[i, start_idx:end_idx] = node.value
-                            token_level_advantages[i, start_idx:end_idx] = node.advantage
+                            token_level_advantages[i, start_idx:end_idx] = node.advantage / sharing_count
                             
-                            logger.debug(f"Leaf {i}, Node {node.node_uid}: assigned value={node.value:.4f}, adv={node.advantage:.4f} to tokens [{start_idx}:{end_idx}]")
+                            logger.debug(f"Leaf {i}, Node {node.node_uid}: assigned value={node.value:.4f}, adv={node.advantage:.4f}/{sharing_count} to tokens [{start_idx}:{end_idx}]")
 
                 logger.info(f"Computed token-level scores and advantages for {batch_size} sequences")
                 
