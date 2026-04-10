@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=48
-#SBATCH -t 02:00:00
+#SBATCH -t 01:00:00
 #SBATCH -o slurm-%x-%j.out
 #SBATCH -e slurm-%x-%j.err
 #SBATCH --mem=200G

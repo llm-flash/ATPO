@@ -556,7 +556,6 @@ class DataParallelPPOActor(BasePPOActor):
                             cliprange_high=clip_ratio_high,
                         )
                     elif self.config.policy_loss=="gspo_turn":
-                        print("========================Gspo turn policy loss============================")
                         pg_loss, pg_metrics = compute_policy_loss_gspo_turn(
                             old_log_prob=old_log_prob,
                             log_prob=log_prob,
