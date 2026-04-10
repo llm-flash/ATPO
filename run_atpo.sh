@@ -4,13 +4,14 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=48
-#SBATCH -t 4:00:00
+#SBATCH -t 02:00:00
 #SBATCH -o slurm-%x-%j.out
 #SBATCH -e slurm-%x-%j.err
 #SBATCH --mem=200G
 #SBATCH --exclusive
 
 source ~/.bashrc
+module load CUDA/12.6.0
 conda activate /scratch/user/debajoym98_tamu.edu/conda_envs/atpo
 
 # export WANDB_API_KEY="your_wandb_api_key_here"

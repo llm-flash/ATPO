@@ -28,7 +28,7 @@ export PYTHONPATH=${PARENT_DIR}/verl_atpo:$PYTHONPATH
 # ============================ Basic Configuration ============================
 # Experiment name and project
 PROJECT_NAME="ATPO"
-EXPERIMENT_NAME="multihop_qwen3_4B"
+EXPERIMENT_NAME="DEBUG"
 
 # Configuration file path
 CONFIG_PATH="${PARENT_DIR}/scripts/config" # Modify the absolute path of the config folder, relative path is not recommended
@@ -93,8 +93,8 @@ CUSTOM_REWARD_FUNCTION_NAME="compute_score"
 # ============================ Training Configuration ============================
 # Training parameters
 TOTAL_EPOCHS=1                     # Total training epochs
-SAVE_FREQ=50                        # Save frequency
-TEST_FREQ=20                        # Test frequency
+SAVE_FREQ=40                       # Save frequency
+TEST_FREQ=10                        # Test frequency
 
 # ============================ Path Configuration ============================
 # Save path
