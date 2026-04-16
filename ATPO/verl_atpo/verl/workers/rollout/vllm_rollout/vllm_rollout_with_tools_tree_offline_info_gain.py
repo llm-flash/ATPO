@@ -1434,6 +1434,7 @@ class vLLMRolloutWithTools(vLLMRollout):
             - Standard deviation of information gain at each level
             - Average overall information gain from root to leaf
             - Average ground-truth probability at each level
+            - Correlation between gt_prob and node value (for nodes with nonzero gt_prob)
         
         Args:
             root_nodes: List of root nodes of the generated trees
@@ -1441,6 +1442,8 @@ class vLLMRolloutWithTools(vLLMRollout):
         level_info_gains = defaultdict(list)
         overall_info_gains = []
         level_gt_probs = defaultdict(list)
+        nonzero_gt_prob_values = []
+        nonzero_gt_prob_node_values = []
 
         for root in root_nodes:
             nodes_to_visit = [(root, 0, root.gt_prob)]  # (node, level, parent_gt_prob)
@@ -1450,6 +1453,9 @@ class vLLMRolloutWithTools(vLLMRollout):
                     info_gain = node.gt_prob - parent_gt_prob
                     level_info_gains[level].append(info_gain)
                     level_gt_probs[level].append(node.gt_prob)
+                    if node.gt_prob != 0.0 and node.value is not None:
+                        nonzero_gt_prob_values.append(node.gt_prob)
+                        nonzero_gt_prob_node_values.append(node.value)
                     if node.is_leaf:
                         overall_info_gains.append(node.gt_prob - root.gt_prob)
                 for child in node.child_nodes:
@@ -1464,6 +1470,20 @@ class vLLMRolloutWithTools(vLLMRollout):
             stats[f"level_{level}_avg_gt_prob"] = np.mean(gt_probs) if gt_probs else 0.0
 
         stats["overall_avg_info_gain"] = np.mean(overall_info_gains) if overall_info_gains else 0.0
+        stats["nonzero_gt_prob_value_pair_count"] = len(nonzero_gt_prob_values)
+
+        # Pearson correlation is undefined with fewer than 2 samples or zero variance.
+        if len(nonzero_gt_prob_values) >= 2:
+            gt_probs_arr = np.array(nonzero_gt_prob_values)
+            values_arr = np.array(nonzero_gt_prob_node_values)
+            if np.std(gt_probs_arr) > 0 and np.std(values_arr) > 0:
+                stats["nonzero_gt_prob_value_correlation"] = float(
+                    np.corrcoef(gt_probs_arr, values_arr)[0, 1]
+                )
+            else:
+                stats["nonzero_gt_prob_value_correlation"] = 0.0
+        else:
+            stats["nonzero_gt_prob_value_correlation"] = 0.0
 
         return stats
 
