@@ -997,6 +997,9 @@ class RayPPOTrainer:
 
                 is_last_step = self.global_steps >= self.total_training_steps
 
+                # Pass global step count to rollout workers so that it can be used for annealing the multiplier
+                gen_batch.meta_info['global_steps'] = self.global_steps
+
                 with _timer("step", timing_raw):
                     
                     # generate a batch
@@ -1011,14 +1014,18 @@ class RayPPOTrainer:
                         if gen_batch_output.meta_info and "metrics" in gen_batch_output.meta_info:
                             metrics.update(gen_batch_output.meta_info["metrics"])
 
-                    ############################### Begin info-gain-specific code ###############################
+                    ############################### Begin logging code ###############################
                     info_gain_stats = gen_batch_output.meta_info["info_gain_stats"]
                     for k, v in info_gain_stats.items():
                         logger.log(
                             data={f"info_gain/{k}": v},
                             step=self.global_steps,
                         )
-                    ############################### End info-gain-specific code ###############################
+                    logger.log(
+                        data={f"actor/annealed_multiplier": gen_batch_output.meta_info.get("annealed_multiplier", 0.0)},
+                        step=self.global_steps,
+                    )
+                    ############################### End logging code ###############################
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with _timer("gen_max", timing_raw):
