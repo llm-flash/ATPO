@@ -660,6 +660,57 @@ class ToolTreeNode:
         
         return self.value
     
+    def compute_unnormalized_value_from_children(self, mode: str = 'child_mean'):
+        """Recursively compute node value based on child values.
+        
+        Args:
+            mode: Computation mode
+                - 'child_mean': Node value is the mean of all child node values
+                - 'child_softmax': Node value is the weighted sum of child values,
+                                   weighted by softmax of child entropies
+        
+        Returns:
+            The computed value for this node
+        """
+        if self.is_leaf:
+            # Leaf node value already set from reward model
+            return self.unnormalized_value
+        
+        # Non-leaf node: compute value from children
+        child_values = []
+        child_entropies = []
+        for child in self.child_nodes:
+            child_value = child.compute_unnormalized_value_from_children(mode)
+            if child_value is not None:
+                child_values.append(child_value)
+                child_entropies.append(child.entropy)
+        
+        if not child_values:
+            # No valid child values, set to 0
+            self.unnormalized_value = 0.0
+            logger.warning(f"Node {self.node_uid}: no valid child values, set unnormalized_value=0.0")
+            return self.unnormalized_value
+        
+        # Compute value based on mode
+        if mode == 'child_mean':
+            self.unnormalized_value = np.mean(child_values)
+        elif mode == 'child_softmax':
+            # Compute softmax weights based on child entropies
+            child_entropies_array = np.array(child_entropies)
+            # Apply softmax: exp(entropy) / sum(exp(entropy))
+            exp_entropies = np.exp(child_entropies_array)
+            softmax_weights = exp_entropies / np.sum(exp_entropies)
+            
+            # Weighted sum of child values
+            child_values_array = np.array(child_values)
+            self.unnormalized_value = np.sum(softmax_weights * child_values_array)
+            
+            logger.debug(f"Node {self.node_uid}: child_softmax weights={softmax_weights}, value={self.unnormalized_value:.4f}")
+        else:
+            raise ValueError(f"Unsupported mode: {mode}. Must be 'child_mean' or 'child_softmax'")
+        
+        return self.unnormalized_value
+
 class vLLMRolloutWithTools(vLLMRollout):
     """
     An advanced vLLM rollout engine capable of handling multiple tools like
@@ -1435,13 +1486,22 @@ class vLLMRolloutWithTools(vLLMRollout):
             - Average overall information gain from root to leaf
             - Average ground-truth probability at each level
             - Correlation between gt_prob and node value (for nodes with nonzero gt_prob)
-        
+            - Average node curiosity at each level
+            - Average overall node curiosity
+            - Average node entropy at each level
+            - Average overall node entropy
+
         Args:
             root_nodes: List of root nodes of the generated trees
         """
         level_info_gains = defaultdict(list)
         overall_info_gains = []
         level_gt_probs = defaultdict(list)
+        level_curiosities = defaultdict(list)
+        overall_curiosities = []
+        level_entropies = defaultdict(list)
+        overall_entropies = []
+
         nonzero_gt_prob_values = []
         nonzero_gt_prob_node_values = []
 
@@ -1449,27 +1509,68 @@ class vLLMRolloutWithTools(vLLMRollout):
             nodes_to_visit = [(root, 0, root.gt_prob)]  # (node, level, parent_gt_prob)
             while nodes_to_visit:
                 node, level, parent_gt_prob = nodes_to_visit.pop(0)
+
+                # Curiosity stats: include nodes that have curiosity computed.
+                node_curiosity = getattr(node, "curiosity", None)
+                if node_curiosity is not None:
+                    level_curiosities[level].append(node_curiosity)
+                    overall_curiosities.append(node_curiosity)
+
+                # Entropy stats: include nodes that have entropy set.
+                if node.entropy is not None:
+                    level_entropies[level].append(node.entropy)
+                    overall_entropies.append(node.entropy)
+
                 if node.gt_prob is not None and parent_gt_prob is not None:
                     info_gain = node.gt_prob - parent_gt_prob
                     level_info_gains[level].append(info_gain)
                     level_gt_probs[level].append(node.gt_prob)
+
                     if node.gt_prob != 0.0 and node.value is not None:
                         nonzero_gt_prob_values.append(node.gt_prob)
                         nonzero_gt_prob_node_values.append(node.value)
+
                     if node.is_leaf:
                         overall_info_gains.append(node.gt_prob - root.gt_prob)
+
                 for child in node.child_nodes:
                     nodes_to_visit.append((child, level + 1, node.gt_prob))
 
         stats = {}
-        for level in sorted(level_info_gains.keys()):
+
+        # Use union of levels so curiosity-only levels are also reported.
+        all_levels = sorted(
+            set(level_info_gains.keys())
+            | set(level_gt_probs.keys())
+            | set(level_curiosities.keys())
+            | set(level_entropies.keys())
+        )
+
+        for level in all_levels:
             gains = level_info_gains[level]
             gt_probs = level_gt_probs[level]
+            curiosities = level_curiosities[level]
+            entropies = level_entropies[level]
+
             stats[f"level_{level}_avg_info_gain"] = np.mean(gains) if gains else 0.0
             stats[f"level_{level}_std_info_gain"] = np.std(gains) if gains else 0.0
             stats[f"level_{level}_avg_gt_prob"] = np.mean(gt_probs) if gt_probs else 0.0
+            stats[f"level_{level}_avg_curiosity"] = (
+                np.mean(curiosities) if curiosities else 0.0
+            )
+            stats[f"level_{level}_avg_entropy"] = (
+                np.mean(entropies) if entropies else 0.0
+            )
 
-        stats["overall_avg_info_gain"] = np.mean(overall_info_gains) if overall_info_gains else 0.0
+        stats["overall_avg_info_gain"] = (
+            np.mean(overall_info_gains) if overall_info_gains else 0.0
+        )
+        stats["overall_avg_curiosity"] = (
+            np.mean(overall_curiosities) if overall_curiosities else 0.0
+        )
+        stats["overall_avg_entropy"] = (
+            np.mean(overall_entropies) if overall_entropies else 0.0
+        )
         stats["nonzero_gt_prob_value_pair_count"] = len(nonzero_gt_prob_values)
 
         # Pearson correlation is undefined with fewer than 2 samples or zero variance.
@@ -1490,6 +1591,7 @@ class vLLMRolloutWithTools(vLLMRollout):
     @GPUMemoryLogger(role="vllm rollout spmd with tools", logger=logger)
     @torch.no_grad()
     def generate_sequences(self, prompts: DataProto, **kwargs) -> DataProto:
+        annealed_multiplier = None # NOTE: For validation steps, this will never be set, so we define it here to avoid an error when trying to log it.
         print('generating via vllm_rollout_with_tools_tree_offline')
         if vllm_version in ("0.5.4", "0.6.3") and self.config.free_cache_engine:
             self.inference_engine.init_cache_engine()
@@ -1909,9 +2011,6 @@ class vLLMRolloutWithTools(vLLMRollout):
         data_proto = DataProto(
             batch=batch, non_tensor_batch=non_tensor_batch, meta_info=meta_info
         )
-
-        # For tracking purposes, traverse all the trees to compute info gain statistics
-        data_proto.meta_info["info_gain_stats"] = self.get_info_gain_stats(root_nodes)
         
         # ===== PHASE 6: COMPUTE REWARDS AND ADVANTAGES =====
         # Only compute rewards and advantages when not in validation mode
@@ -2012,6 +2111,9 @@ class vLLMRolloutWithTools(vLLMRollout):
                         # Normalize each leaf value: (value - mean) / (std + epsilon)
                         for leaf in tree_leaves:
                             if leaf.value is not None:
+                                # Store original value (i.e. reward) for curiosity computation, but maintain convert it to
+                                # binary pass/fail (ignoring format rewards)
+                                leaf.unnormalized_value = np.clip(leaf.value, 0, 1)
                                 leaf.value = (leaf.value - mean_value) / (std_value + epsilon)
                         
                         logger.info(f"Tree {tree_uid}: normalized {len(tree_leaves)} leaf nodes (mean={mean_value:.4f}, std={std_value:.4f})")
@@ -2021,6 +2123,7 @@ class vLLMRolloutWithTools(vLLMRollout):
                     print(f"Computing node values using {self.node_value_mode} mode...")
                     for root in root_nodes:
                         root.compute_value_from_children(mode=self.node_value_mode)
+                        root.compute_unnormalized_value_from_children(mode=self.node_value_mode)  # Store unnormalized value for curiosity computation
                         logger.info(f"Tree {root.tree_uid}: computed node values using {self.node_value_mode} (root value={root.value:.4f})")
                 elif self.node_value_mode=='leaf_mean':
                     print("Computing node values using leaf_mean mode...")
@@ -2042,13 +2145,25 @@ class vLLMRolloutWithTools(vLLMRollout):
                     raise ValueError(f"Unsupported node_value_mode: {self.node_value_mode}")
                 
                 # step 3: Compute node advantages based on node_adv_mode
+                annealed_multiplier = 0.3 + 0.5*(1 - prompts.meta_info.get("global_steps", 1.0)/prompts.meta_info.get("annealing_steps", 100.0))**2
                 if self.node_adv_mode == 'node_value':
                     print("Computing node advantages using node_value mode...")
                     # Directly use value as advantage
                     for root in root_nodes:
                         all_nodes = [root] + root.get_subtree_nodes()
+                        # Get curiosity value for each node, and compute the average to serve as a baseline
+                        all_curiosities = []
                         for node in all_nodes:
-                            node.advantage = node.value
+                            assert hasattr(node, 'unnormalized_value'), f"Node {node.node_uid} is missing unnormalized_value for curiosity computation"
+                            node.curiosity = (node.unnormalized_value - node.gt_prob) if node.gt_prob is not None else 0.0
+                            all_curiosities.append(node.curiosity)
+                        
+                        # Compute average curiosity as baseline
+                        avg_curiosity = np.mean(all_curiosities) if all_curiosities else 0.0
+                        stdev_curiosity = np.std(all_curiosities) if all_curiosities else 1.0
+
+                        for node in all_nodes:
+                            node.advantage = node.value + annealed_multiplier*node.entropy*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6)  # Combine value and curiosity, with normalization
                 elif self.node_adv_mode == 'diff_parent':
                     print("Computing node advantages using diff_parent mode...")
                     # Use node value minus parent value as advantage
@@ -2123,7 +2238,7 @@ class vLLMRolloutWithTools(vLLMRollout):
                             
                             # Assign node's value and advantage to these tokens
                             token_level_scores[i, start_idx:end_idx] = node.value
-                            token_level_advantages[i, start_idx:end_idx] = node.advantage
+                            token_level_advantages[i, start_idx:end_idx] = node.advantage / len(node.get_all_leaves())
                             
                             logger.debug(f"Leaf {i}, Node {node.node_uid}: assigned value={node.value:.4f}, adv={node.advantage:.4f} to tokens [{start_idx}:{end_idx}]")
 
@@ -2145,6 +2260,11 @@ class vLLMRolloutWithTools(vLLMRollout):
             logger.info("=" * 60)
             logger.info("PHASE 6: SKIPPED (validation mode)")
             logger.info("=" * 60)
+
+        # For tracking purposes, traverse all the trees to compute info gain statistics
+        data_proto.meta_info["info_gain_stats"] = self.get_info_gain_stats(root_nodes)
+        if annealed_multiplier is not None:
+            data_proto.meta_info["annealed_multiplier"] = annealed_multiplier
 
         logger.info("=" * 60)
         logger.info("GENERATION COMPLETED")
