@@ -767,6 +767,10 @@ class vLLMRolloutWithTools(vLLMRollout):
         self.leaf_value_norm = self.config.leaf_value_norm
         self.node_value_mode = self.config.node_value_mode  # child_mean/leaf_mean/child_softmax
         self.node_adv_mode = self.config.node_adv_mode  #vanilla/node_value/diff_parent/...
+        ## new options for our curiosity term
+        self.annealing_steps = self.config.get("annealing_steps", 100.0)
+        self.entropy_mixing_method = self.config.get("entropy_mixing_method", "multiplicative")  # multiplicative/additive
+        self.square_curiosity = self.config.get("square_curiosity", False)
         
         # Initialize KL controller if needed
         if self.use_kl_in_reward:
@@ -2145,7 +2149,12 @@ class vLLMRolloutWithTools(vLLMRollout):
                     raise ValueError(f"Unsupported node_value_mode: {self.node_value_mode}")
                 
                 # step 3: Compute node advantages based on node_adv_mode
-                annealed_multiplier = 0.3 + 0.5*(1 - prompts.meta_info.get("global_steps", 1.0)/prompts.meta_info.get("annealing_steps", 100.0))**2
+                if "global_steps" not in prompts.meta_info.keys():
+                    raise ValueError("global_steps not found in prompts.meta_info, which is required for annealing")
+                annealed_multiplier = 0.8 + 0.5*max(1 - prompts.meta_info.get("global_steps", 1.0)/self.annealing_steps, 0.0)**2
+                # These two multipliers will be used if entropy_mixing_method is 'additive', otherwise they won't have any effect
+                entropy_multiplier = annealed_multiplier
+                curiosity_multiplier = annealed_multiplier
                 if self.node_adv_mode == 'node_value':
                     print("Computing node advantages using node_value mode...")
                     # Directly use value as advantage
@@ -2156,6 +2165,8 @@ class vLLMRolloutWithTools(vLLMRollout):
                         for node in all_nodes:
                             assert hasattr(node, 'unnormalized_value'), f"Node {node.node_uid} is missing unnormalized_value for curiosity computation"
                             node.curiosity = (node.unnormalized_value - node.gt_prob) if node.gt_prob is not None else 0.0
+                            if self.square_curiosity:
+                                node.curiosity = node.curiosity ** 2
                             all_curiosities.append(node.curiosity)
                         
                         # Compute average curiosity as baseline
@@ -2163,7 +2174,11 @@ class vLLMRolloutWithTools(vLLMRollout):
                         stdev_curiosity = np.std(all_curiosities) if all_curiosities else 1.0
 
                         for node in all_nodes:
-                            node.advantage = node.value + annealed_multiplier*node.entropy*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6)  # Combine value and curiosity, with normalization
+                            if self.entropy_mixing_method == 'multiplicative':
+                                node.advantage = node.value + annealed_multiplier*node.entropy*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6)
+                            elif self.entropy_mixing_method == 'additive':
+                                node.advantage = node.value + entropy_multiplier*node.entropy + curiosity_multiplier*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6)
+
                 elif self.node_adv_mode == 'diff_parent':
                     print("Computing node advantages using diff_parent mode...")
                     # Use node value minus parent value as advantage

@@ -1015,16 +1015,17 @@ class RayPPOTrainer:
                             metrics.update(gen_batch_output.meta_info["metrics"])
 
                     ############################### Begin logging code ###############################
-                    info_gain_stats = gen_batch_output.meta_info["info_gain_stats"]
-                    for k, v in info_gain_stats.items():
+                    if gen_batch_output.meta_info and "info_gain_stats" in gen_batch_output.meta_info:
+                        info_gain_stats = gen_batch_output.meta_info["info_gain_stats"]
+                        for k, v in info_gain_stats.items():
+                            logger.log(
+                                data={f"info_gain/{k}": v},
+                                step=self.global_steps,
+                            )
                         logger.log(
-                            data={f"info_gain/{k}": v},
+                            data={f"actor/annealed_multiplier": gen_batch_output.meta_info.get("annealed_multiplier", 0.0)},
                             step=self.global_steps,
                         )
-                    logger.log(
-                        data={f"actor/annealed_multiplier": gen_batch_output.meta_info.get("annealed_multiplier", 0.0)},
-                        step=self.global_steps,
-                    )
                     ############################### End logging code ###############################
 
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
