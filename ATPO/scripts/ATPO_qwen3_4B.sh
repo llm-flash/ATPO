@@ -28,7 +28,7 @@ export PYTHONPATH=${PARENT_DIR}/verl_atpo:$PYTHONPATH
 # ============================ Basic Configuration ============================
 # Experiment name and project
 PROJECT_NAME="EXPERIMENTS"
-EXPERIMENT_NAME="MCIG"
+EXPERIMENT_NAME="Maximum Entropy Credit Assignment"
 
 # Configuration file path
 CONFIG_PATH="${PARENT_DIR}/scripts/config" # Modify the absolute path of the config folder, relative path is not recommended
@@ -174,7 +174,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.leaf_value_norm=True \
     actor_rollout_ref.rollout.node_value_mode=child_mean \
     actor_rollout_ref.rollout.node_adv_mode=entropy_weighted \
-    actor_rollout_ref.rollout.adv_entropy_alpha=0.2 \
+    actor_rollout_ref.rollout.adv_entropy_alpha=0.4 \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.cache_file=${SEARCH_CACHE_PATH} \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.api_key=${API_KEY} \
     actor_rollout_ref.rollout.multi_turn.enable=${ENABLE_MULTI_TURN} \

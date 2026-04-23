@@ -1739,11 +1739,14 @@ class vLLMRolloutWithTools(vLLMRollout):
                         std_value = np.std(leaf_values_array)
                         
                         # Normalize each leaf value: (value - mean) / (std + epsilon)
+                        #Variant
                         for leaf in tree_leaves:
                             if leaf.value is not None:
                                 leaf.value = (leaf.value - mean_value) / (std_value + epsilon)
+                                # leaf.value = (leaf.value - mean_value)/0.4
                         
-                        logger.info(f"Tree {tree_uid}: normalized {len(tree_leaves)} leaf nodes (mean={mean_value:.4f}, std={std_value:.4f})")
+                        # logger.info(f"Tree {tree_uid}: normalized {len(tree_leaves)} leaf nodes (mean={mean_value:.4f}, std={std_value:.4f})")
+                        logger.info(f"Tree {tree_uid}: normalized {len(tree_leaves)} leaf nodes (mean={mean_value:.4f})")
                 
                 # Step 2: Compute node values based on node_value_mode
                 if self.node_value_mode in ['child_mean', 'child_softmax']:
@@ -1819,7 +1822,7 @@ class vLLMRolloutWithTools(vLLMRollout):
                         all_descendants = root.get_subtree_nodes()
                         for node in all_descendants:
                             diff = node.value - node.parent_node.value
-                            node.advantage = node.value + alpha * node.entropy * diff
+                            node.advantage = node.value + alpha * diff + 0.5 * node.entropy
                 else:
                     raise ValueError(f"Unsupported node_adv_mode: {self.node_adv_mode}")
                 
