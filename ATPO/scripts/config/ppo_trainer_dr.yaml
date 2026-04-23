@@ -148,6 +148,8 @@ actor_rollout_ref:
     leaf_value_norm: False #True/False
     node_value_mode: child_mean # child_mean/leaf_mean/child_softmax
     node_adv_mode: vanilla #vanilla/node_value/diff_parent/diff_global/diff_localglobal/...
+    ##### added for advantage computation
+    entropy_mixing_method: multiplicative
     ##### added for tree search
 
     # for vllm rollout

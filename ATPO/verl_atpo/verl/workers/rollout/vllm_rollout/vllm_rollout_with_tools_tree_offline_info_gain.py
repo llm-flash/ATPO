@@ -769,7 +769,7 @@ class vLLMRolloutWithTools(vLLMRollout):
         self.node_adv_mode = self.config.node_adv_mode  #vanilla/node_value/diff_parent/...
         ## new options for our curiosity term
         self.annealing_steps = self.config.get("annealing_steps", 100.0)
-        self.entropy_mixing_method = self.config.get("entropy_mixing_method", "multiplicative")  # multiplicative/additive
+        self.entropy_mixing_method = self.config.entropy_mixing_method  # multiplicative/additive/S1/S2
         self.square_curiosity = self.config.get("square_curiosity", False)
         
         # Initialize KL controller if needed
@@ -2178,6 +2178,10 @@ class vLLMRolloutWithTools(vLLMRollout):
                                 node.advantage = node.value + annealed_multiplier*node.entropy*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6)
                             elif self.entropy_mixing_method == 'additive':
                                 node.advantage = node.value + entropy_multiplier*node.entropy + curiosity_multiplier*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6)
+                            elif self.entropy_mixing_method == 'S1':
+                                node.advantage = node.value + annealed_multiplier*((((node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6))**2) * node.entropy)
+                            elif self.entropy_mixing_method == 'S2':
+                                node.advantage = node.value + annealed_multiplier*((((node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6))**2) + node.entropy)
 
                 elif self.node_adv_mode == 'diff_parent':
                     print("Computing node advantages using diff_parent mode...")
