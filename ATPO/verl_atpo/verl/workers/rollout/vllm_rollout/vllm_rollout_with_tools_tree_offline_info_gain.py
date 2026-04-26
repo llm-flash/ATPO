@@ -356,7 +356,6 @@ class ToolTreeNode:
             mode: Selection mode, either 'random' or 'entropy'
                 - 'random': randomly select nodes
                 - 'entropy': select nodes with highest probability scores
-                - 'info_gain': select nodes with highest info gain (gt_prob - parent.gt_prob)
             entropy_weight: Weight for entropy delta in probability calculation
             branch_probability: Base branch probability threshold (not used in offline mode)
         """
@@ -394,51 +393,6 @@ class ToolTreeNode:
                 # prob = prob * penalty_factor
                 prob = prob-0.05*num_existing_branches
                 
-                
-                node_scores.append((node, prob))
-            # print('node probs:', [node_score[1] for node_score in node_scores])
-            # Sort nodes by probability score (high to low)
-            sorted_nodes = sorted(node_scores, key=lambda x: x[1], reverse=True)
-            
-            # Select top n nodes
-            if len(sorted_nodes) >= n:
-                return [node for node, score in sorted_nodes[:n]]
-            else:
-                # If not enough nodes, duplicate the highest probability nodes
-                result = [node for node, score in sorted_nodes]
-                while len(result) < n:
-                    additional = [node for node, score in sorted_nodes[:min(n - len(result), len(sorted_nodes))]]
-                    result.extend(additional)
-                return result[:n]
-        
-        elif mode == 'info_gain':
-            # Calculate probability score for each node
-            node_scores = []
-            for node in candidate_nodes:
-                if node.parent_node is None or node.parent_node.parent_node is None:
-                    # Assign a baseline score to the prompt nodes since we cannot compute info gain for them
-                    info_gain = 0
-                else:
-                    node_gt_prob = node.gt_prob
-                    parent_gt_prob = node.parent_node.gt_prob
-                    assert node_gt_prob is not None and parent_gt_prob is not None, "gt_prob must be set for info gain calculation"
-                    info_gain = node_gt_prob - parent_gt_prob
-
-                # Calculate base probability with random component and entropy delta
-                # prob = random.random() + entropy_weight * entropy_delta
-                # prob = entropy_weight * entropy_delta
-                prob = info_gain
-                
-                # Apply node-level branch penalty based on existing children
-                # If a node has already been expanded (has children), penalize further expansion
-                if node.parent_node is None:
-                    num_existing_branches = max(0, len(node.child_nodes) - 1)
-                else:
-                    num_existing_branches = max(0, len(node.parent_node.child_nodes) - 1)
-                penalty_factor = 1.0 - 0.05 * num_existing_branches
-                # penalty_factor = max(0.0, penalty_factor)  # Ensure not negative
-                # prob = prob * penalty_factor
-                prob = prob-0.05*num_existing_branches
                 
                 node_scores.append((node, prob))
             # print('node probs:', [node_score[1] for node_score in node_scores])
@@ -743,8 +697,8 @@ class vLLMRolloutWithTools(vLLMRollout):
         assert self.config.n == self.samples_per_tree
 
         # Validate expansion_mode
-        if self.expansion_mode not in ['random', 'entropy', 'info_gain']:
-            raise ValueError(f"Invalid expansion_mode: {self.expansion_mode}. Must be 'random' or 'entropy' or 'info_gain'")
+        if self.expansion_mode not in ['random', 'entropy']:
+            raise ValueError(f"Invalid expansion_mode: {self.expansion_mode}. Must be 'random' or 'entropy'")
         
         # Validate samples_per_tree
         if self.samples_per_tree < 1:
@@ -770,7 +724,6 @@ class vLLMRolloutWithTools(vLLMRollout):
         ## new options for our curiosity term
         self.annealing_steps = self.config.get("annealing_steps", 100.0)
         self.entropy_mixing_method = self.config.get("entropy_mixing_method", "multiplicative")  # multiplicative/additive
-        self.square_curiosity = self.config.get("square_curiosity", False)
         
         # Initialize KL controller if needed
         if self.use_kl_in_reward:
@@ -1482,8 +1435,8 @@ class vLLMRolloutWithTools(vLLMRollout):
             assert ground_truths[i] in decoded_ground_truth, f"Ground-truth answer not found within the expected range of tokens. Expected to find '{ground_truths[i]}' in '{decoded_ground_truth}'"
         return [(pseudo_resps_with_gt[i], gt_token_indices[i]) for i in range(len(pseudo_resps_with_gt))]
         
-    def get_info_gain_stats(self, root_nodes: List[ToolTreeNode]) -> Dict:
-        """Calculate information gain statistics for the generated trees.
+    def get_curiosity_stats(self, root_nodes: List[ToolTreeNode]) -> Dict:
+        """Calculate statistics for the generated trees.
         Statistics calculated:
             - Average information gain at each level
             - Standard deviation of information gain at each level
@@ -2165,8 +2118,6 @@ class vLLMRolloutWithTools(vLLMRollout):
                         for node in all_nodes:
                             assert hasattr(node, 'unnormalized_value'), f"Node {node.node_uid} is missing unnormalized_value for curiosity computation"
                             node.curiosity = (node.unnormalized_value - node.gt_prob) if node.gt_prob is not None else 0.0
-                            if self.square_curiosity:
-                                node.curiosity = node.curiosity ** 2
                             all_curiosities.append(node.curiosity)
                         
                         # Compute average curiosity as baseline
@@ -2276,8 +2227,8 @@ class vLLMRolloutWithTools(vLLMRollout):
             logger.info("PHASE 6: SKIPPED (validation mode)")
             logger.info("=" * 60)
 
-        # For tracking purposes, traverse all the trees to compute info gain statistics
-        data_proto.meta_info["info_gain_stats"] = self.get_info_gain_stats(root_nodes)
+        # For tracking purposes, traverse all the trees to compute relevant statistics
+        data_proto.meta_info["curiosity_stats"] = self.get_curiosity_stats(root_nodes)
         if annealed_multiplier is not None:
             data_proto.meta_info["annealed_multiplier"] = annealed_multiplier
 
