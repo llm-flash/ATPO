@@ -2129,6 +2129,10 @@ class vLLMRolloutWithTools(vLLMRollout):
                                 node.advantage = node.value + annealed_multiplier*node.entropy*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6)
                             elif self.entropy_mixing_method == 'additive':
                                 node.advantage = node.value + entropy_multiplier*node.entropy + curiosity_multiplier*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6)
+                            elif self.entropy_mixing_method == 'S1':
+                                node.advantage = node.value + annealed_multiplier*((((node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6))**2) * node.entropy)
+                            elif self.entropy_mixing_method == 'S2':
+                                node.advantage = node.value + annealed_multiplier*((((node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6))**2) + node.entropy)
 
                 elif self.node_adv_mode == 'diff_parent':
                     print("Computing node advantages using diff_parent mode...")
