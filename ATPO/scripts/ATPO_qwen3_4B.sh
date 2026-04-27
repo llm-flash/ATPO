@@ -51,7 +51,7 @@ MAX_RESPONSE_LENGTH=6192           # Maximum response length
 #VALID_FILES=["${PARENT_DIR}/../ARPO/rl_datasets/valid.parquet"]
 
 TRAIN_FILES="/scratch/user/debajoym98_tamu.edu/ATPO/rl_datasets/hotpotqa/train.parquet"
-VALID_FILES=["/scratch/user/debajoym98_tamu.edu/ATPO/rl_datasets/hotpotqa/test_512.parquet"]
+VALID_FILES=["/scratch/user/debajoym98_tamu.edu/ATPO/rl_datasets/hotpotqa/test.parquet"]
 
 # ============================ Model Configuration ============================
 # Actor model path
@@ -60,16 +60,22 @@ ACTOR_MODEL_PATH="/scratch/user/debajoym98_tamu.edu/ATPO/models/Qwen3-4B"
 # ============================ Rollout Configuration ==========================
 # Rollout settings
 ROLLOUT_NAME="vllm"                 # Use vllm engine
-ROLLOUT_MODE="sync_with_tool_tree"       # Synchronous mode with tool support
+ROLLOUT_MODE="sync_with_tool_tree"       # sync_with_tool_tree for AT2PO, sync_with_tool_tree_cache for our algorithm
 BRANCH_PROBABILITY=0.5             # Branch probability  not used in offline tree search
 Entropy_weight=0.2                 # used in offline tree search
 # Tree related settings 
 INITIAL_ROLLOUTS=10                 # Initial rollout number
 EXPANSION_MODE="entropy"       # random or entropy
+LEAF_VALUE_NORM=True             # Whether to normalize leaf values based on the number of tokens in the response (to reduce variance for long responses)
+NODE_VALUE_MODE="child_mean"        # child_softmax for AT2PO, child_mean for our algorithm
 EXPANSION_ITERATIONS=2        # Number of expansion iterations
 BEAM_SIZE=6                        # Beam size
 SAMPLES_PER_TREE=22                  # Number of samples per tree
 ROLLOUT_N=$SAMPLES_PER_TREE          # Number of responses generated per sample
+# Hyperparameters for curiosity bonus
+ANNEALING_STEPS=150           # Number of steps to anneal the curiosity bonus multiplier
+USE_COSINE_ANNEALING=True     # Whether to use cosine annealing for the curiosity bonus multiplier
+ENTROPY_MIXING_METHOD="no_entropy" # Method to mix entropy into node selection, options: no_entropy, additive, multiplicative
 
 # ============================ Feature Flags ============================
 ENABLE_ENTROPY_BALANCED_CLIPPING=False
@@ -77,6 +83,7 @@ ENABLE_ENTROPY_BALANCED_ADVANTAGE=False
 ENABLE_DYNAMIC_ROLLOUTS=False
 ENABLE_MULTI_TURN=True
 TOOL_CONFIG_PATH="${PARENT_DIR}/verl_atpo/examples/sglang_multiturn/config/tool_config/search_tool_config.yaml"
+MAX_TOOL_CALLS=6 # 6 is the value used in the AT2PO paper
 
 # ============================ Search Tool Configuration ==========================
 # The search tool calls the local RAG server (http://127.0.0.1:8000/retrieve)
@@ -93,7 +100,7 @@ CUSTOM_REWARD_FUNCTION_NAME="compute_score"
 # ============================ Training Configuration ============================
 # Training parameters
 TOTAL_EPOCHS=1                     # Total training epochs
-SAVE_FREQ=50                        # Save frequency
+SAVE_FREQ=20                        # Save frequency
 TEST_FREQ=20                        # Test frequency
 
 # ============================ Path Configuration ============================
@@ -171,11 +178,15 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.samples_per_tree=${SAMPLES_PER_TREE} \
     actor_rollout_ref.rollout.branch_probability=${BRANCH_PROBABILITY} \
     actor_rollout_ref.rollout.entropy_weight=${Entropy_weight} \
-    actor_rollout_ref.rollout.leaf_value_norm=True \
-    actor_rollout_ref.rollout.node_value_mode=child_softmax \
+    actor_rollout_ref.rollout.leaf_value_norm=${LEAF_VALUE_NORM} \
+    actor_rollout_ref.rollout.node_value_mode=${NODE_VALUE_MODE} \
     actor_rollout_ref.rollout.node_adv_mode=node_value \
+    actor_rollout_ref.rollout.entropy_mixing_method=${ENTROPY_MIXING_METHOD} \
+    +actor_rollout_ref.rollout.annealing_steps=${ANNEALING_STEPS} \
+    +actor_rollout_ref.rollout.cosine_annealing=${USE_COSINE_ANNEALING} \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.cache_file=${SEARCH_CACHE_PATH} \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.api_key=${API_KEY} \
+    ++actor_rollout_ref.rollout.tools.call_limit=${MAX_TOOL_CALLS} \
     actor_rollout_ref.rollout.multi_turn.enable=${ENABLE_MULTI_TURN} \
     actor_rollout_ref.rollout.multi_turn.tool_config_path=${TOOL_CONFIG_PATH} \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=$((4*(MAX_PROMPT_LENGTH+MAX_RESPONSE_LENGTH))) \
