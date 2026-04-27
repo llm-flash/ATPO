@@ -181,7 +181,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.leaf_value_norm=${LEAF_VALUE_NORM} \
     actor_rollout_ref.rollout.node_value_mode=${NODE_VALUE_MODE} \
     actor_rollout_ref.rollout.node_adv_mode=node_value \
-    +actor_rollout_ref.rollout.entropy_mixing_method=${ENTROPY_MIXING_METHOD} \
+    actor_rollout_ref.rollout.entropy_mixing_method=${ENTROPY_MIXING_METHOD} \
     +actor_rollout_ref.rollout.annealing_steps=${ANNEALING_STEPS} \
     +actor_rollout_ref.rollout.cosine_annealing=${USE_COSINE_ANNEALING} \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.cache_file=${SEARCH_CACHE_PATH} \
