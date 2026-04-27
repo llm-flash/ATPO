@@ -722,8 +722,9 @@ class vLLMRolloutWithTools(vLLMRollout):
         self.node_value_mode = self.config.node_value_mode  # child_mean/leaf_mean/child_softmax
         self.node_adv_mode = self.config.node_adv_mode  #vanilla/node_value/diff_parent/...
         ## new options for our curiosity term
-        self.annealing_steps = self.config.get("annealing_steps", 100.0)
-        self.entropy_mixing_method = self.config.get("entropy_mixing_method", "multiplicative")  # multiplicative/additive
+        self.annealing_steps = self.config.get("annealing_steps", 150.0)
+        self.cosine_annealing = self.config.get("cosine_annealing", True)
+        self.entropy_mixing_method = self.config.get("entropy_mixing_method", "no_entropy")  # no_entropy/multiplicative/additive
         
         # Initialize KL controller if needed
         if self.use_kl_in_reward:
@@ -2104,7 +2105,14 @@ class vLLMRolloutWithTools(vLLMRollout):
                 # step 3: Compute node advantages based on node_adv_mode
                 if "global_steps" not in prompts.meta_info.keys():
                     raise ValueError("global_steps not found in prompts.meta_info, which is required for annealing")
-                annealed_multiplier = 0.8 + 0.5*max(1 - prompts.meta_info.get("global_steps", 1.0)/self.annealing_steps, 0.0)**2
+                if self.cosine_annealing:
+                    global_steps = float(prompts.meta_info.get("global_steps", 1.0))
+                    annealing_steps = max(float(self.annealing_steps), 1e-8)
+                    progress = min(max(global_steps / annealing_steps, 0.0), 1.0)
+                    annealed_multiplier = 0.6 + 0.7 * (1.0 + np.cos(np.pi * progress)) / 2.0
+                    annealed_multiplier = max(annealed_multiplier, 0.0)
+                else:
+                    annealed_multiplier = 0.8 + 0.5*max(1 - prompts.meta_info.get("global_steps", 1.0)/self.annealing_steps, 0.0)**2
                 # These two multipliers will be used if entropy_mixing_method is 'additive', otherwise they won't have any effect
                 entropy_multiplier = annealed_multiplier
                 curiosity_multiplier = annealed_multiplier
