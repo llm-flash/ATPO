@@ -10,9 +10,9 @@
 #   - node_value_mode: child_softmax (softmax-weighted upward value propagation)
 
 # Switch to the directory of the script
-PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PARENT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 cd "$PARENT_DIR"
 echo "Switched to parent directory: $PARENT_DIR"
 
@@ -35,8 +35,8 @@ export RAY_DEBUG=1
 export PYTHONPATH=${PARENT_DIR}/verl_atpo:$PYTHONPATH
 
 # ============================ Basic Configuration ============================
-PROJECT_NAME="${ENTROPY_METHOD}"
-EXPERIMENT_NAME="lr_cosine"
+PROJECT_NAME="CACHE"
+EXPERIMENT_NAME="${ENTROPY_METHOD}"
 
 CONFIG_PATH="${PARENT_DIR}/scripts/config"
 CONFIG_NAME="ppo_trainer_dr.yaml"
@@ -55,7 +55,7 @@ TRAIN_FILES="${PROJECT_DIR}/rl_datasets/hotpotqa/train.parquet"
 VALID_FILES=["${PROJECT_DIR}/rl_datasets/hotpotqa/test_512.parquet"]
 
 # ============================ Model Configuration ============================
-ACTOR_MODEL_PATH="${PROJECT_DIR}/ATPO/models/Qwen3-4B"
+ACTOR_MODEL_PATH="${PROJECT_DIR}/models/Qwen3-4B"
 
 # ============================ Rollout Configuration ==========================
 ROLLOUT_NAME="vllm"

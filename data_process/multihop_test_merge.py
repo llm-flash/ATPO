@@ -175,7 +175,7 @@ def make_prefix(dp, template_type):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--local_dir', default='../multihop')
+    parser.add_argument('--local_dir', default='rl_datasets')
     parser.add_argument('--hdfs_dir', default=None)
     parser.add_argument('--template_type', type=str, default='base')
     parser.add_argument('--data_sources', default='hotpotqa,2wikimultihopqa,musique,bamboogle')
@@ -243,7 +243,7 @@ if __name__ == '__main__':
     hdfs_dir = args.hdfs_dir
 
     all_test_dataset = datasets.concatenate_datasets(all_dataset)
-    all_test_dataset.to_parquet(os.path.join(local_dir, 'test.parquet'))
+    all_test_dataset.to_parquet(os.path.join(local_dir, 'multihop_test_merged.parquet'))
 
     if hdfs_dir is not None:
         makedirs(hdfs_dir)

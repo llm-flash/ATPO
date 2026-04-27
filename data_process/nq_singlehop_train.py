@@ -173,7 +173,7 @@ def make_prefix(dp, template_type):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--local_dir', default='../nq')
+    parser.add_argument('--local_dir', default='rl_datasets/nq')
     parser.add_argument('--hdfs_dir', default=None)
     parser.add_argument('--template_type', type=str, default='base')
 
@@ -221,12 +221,13 @@ if __name__ == '__main__':
 
     train_dataset = train_dataset.map(function=make_map_fn('train'), with_indices=True)
     test_dataset = test_dataset.map(function=make_map_fn('test'), with_indices=True)
+    test_dataset = test_dataset.select(range(512))
 
     local_dir = args.local_dir
     hdfs_dir = args.hdfs_dir
 
     train_dataset.to_parquet(os.path.join(local_dir, 'train.parquet'))
-    test_dataset.to_parquet(os.path.join(local_dir, 'test.parquet'))
+    test_dataset.to_parquet(os.path.join(local_dir, 'test_512.parquet'))
 
     if hdfs_dir is not None:
         makedirs(hdfs_dir)
