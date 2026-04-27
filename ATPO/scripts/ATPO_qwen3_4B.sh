@@ -60,7 +60,7 @@ ACTOR_MODEL_PATH="/scratch/user/debajoym98_tamu.edu/ATPO/models/Qwen3-4B"
 # ============================ Rollout Configuration ==========================
 # Rollout settings
 ROLLOUT_NAME="vllm"                 # Use vllm engine
-ROLLOUT_MODE="sync_with_tool_tree"       # sync_with_tool_tree for AT2PO, sync_with_tool_tree_info_gain for our algorithm
+ROLLOUT_MODE="sync_with_tool_tree"       # sync_with_tool_tree for AT2PO, sync_with_tool_tree_cache for our algorithm
 BRANCH_PROBABILITY=0.5             # Branch probability  not used in offline tree search
 Entropy_weight=0.2                 # used in offline tree search
 # Tree related settings 
