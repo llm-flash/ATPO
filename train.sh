@@ -7,7 +7,6 @@
 #SBATCH --mem=128G
 #SBATCH --gpus=8
 #SBATCH --time=48:00:00
-#SBATCH --account=early-adopters
 #SBATCH --qos=standard
 #SBATCH --output=logs/slurm_%j.log
 
@@ -28,28 +27,24 @@ MODEL_ARG=$(echo "$3" | tr '[:upper:]' '[:lower:]')
 # ==========================================
 # Resolve Relative Directories
 # ==========================================
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-PARENT_DIR="$(dirname "$SCRIPT_DIR")"
-PROJECT_DIR="$(dirname "$PARENT_DIR")"
-cd "$PARENT_DIR"
-echo "Switched to parent directory: $PARENT_DIR"
+PROJECT_DIR="$SLURM_SUBMIT_DIR"
 echo "Project directory set to: $PROJECT_DIR"
 
 # 1. Algorithm specific settings
 if [ "$ALGO_ARG" == "cache" ]; then
     PROJECT_NAME="CACHE"
-    ROLLOUT_MODE="sync_with_tool_tree_info_gain"
-    EXPANSION_MODE="info_gain"
+    ROLLOUT_MODE="sync_with_tool_tree_cache"
+    EXPANSION_MODE="entropy"
     NODE_VALUE_MODE="child_mean"
     SEARCH_CACHE_PATH="${PROJECT_DIR}/search_cache/search_cache_entropy_branch.json"
-    EXTRA_TOOL_ARGS="actor_rollout_ref.rollout.tools.call_limit=3"
+    EXTRA_TOOL_ARGS="actor_rollout_ref.rollout.tools.call_limit=6"
 elif [ "$ALGO_ARG" == "atpo" ]; then
     PROJECT_NAME="ATPO"
     ROLLOUT_MODE="sync_with_tool_tree"
     EXPANSION_MODE="entropy"
     NODE_VALUE_MODE="child_softmax"
     SEARCH_CACHE_PATH="${PROJECT_DIR}/search_cache/search_cache.json"
-    EXTRA_TOOL_ARGS=""
+    EXTRA_TOOL_ARGS="actor_rollout_ref.rollout.tools.call_limit=6"
 else
     echo "Error: Invalid algorithm '$ALGO_ARG'. Must be 'atpo' or 'cache'."
     exit 1
@@ -98,7 +93,7 @@ export MKL_THREADING_LAYER=GNU
 export RAY_memory_usage_threshold=0.8  
 export RAY_memory_monitor_refresh_ms=0 
 export RAY_DEBUG=1
-export PYTHONPATH=${PARENT_DIR}/verl_atpo:$PYTHONPATH
+export PYTHONPATH=${PROJECT_DIR}/ATPO/verl_atpo:$PYTHONPATH
 
 # ==========================================
 # Ray Environment Preparation
@@ -117,7 +112,7 @@ export RAY_DASHBOARD_AGENT_ENABLED=0
 # ==========================================
 # Start Background RAG Server
 # ==========================================
-RAG_LOG="logs/rag_server_${SLURM_JOB_ID}.log"
+RAG_LOG="${PROJECT_DIR}/logs/rag_server_${SLURM_JOB_ID}.log"
 
 conda run -n retriever_env \
     python rag_server/retrieval_server.py \
@@ -182,7 +177,7 @@ mkdir -p "$SAVE_PATH/validation"
 echo "Starting $PROJECT_NAME training ($EXPERIMENT_NAME)..."
 
 python3 -m verl.trainer.main_ppo \
-    --config-path="${PARENT_DIR}/scripts/config" \
+    --config-path="${PROJECT_DIR}/ATPO/scripts/config" \
     --config-name="ppo_trainer_dr.yaml" \
     algorithm.adv_estimator=grpo \
     algorithm.kl_ctrl.kl_coef=0.0 \
@@ -230,11 +225,11 @@ python3 -m verl.trainer.main_ppo \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.cache_file=${SEARCH_CACHE_PATH} \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.api_key="unused_local_rag_server" \
     actor_rollout_ref.rollout.multi_turn.enable=True \
-    actor_rollout_ref.rollout.multi_turn.tool_config_path="${PARENT_DIR}/verl_atpo/examples/sglang_multiturn/config/tool_config/search_tool_config.yaml" \
+    actor_rollout_ref.rollout.multi_turn.tool_config_path="${PROJECT_DIR}/ATPO/verl_atpo/examples/sglang_multiturn/config/tool_config/search_tool_config.yaml" \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=$((4*(2000+6192))) \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     reward_model.reward_manager="naive" \
-    custom_reward_function.path="${PARENT_DIR}/verl_atpo/verl/utils/reward_score/deep_research_em.py" \
+    custom_reward_function.path="${PROJECT_DIR}/ATPO/verl_atpo/verl/utils/reward_score/deep_research_em.py" \
     custom_reward_function.name="compute_score" \
     trainer.critic_warmup=0 \
     trainer.logger="[console, wandb]" \
