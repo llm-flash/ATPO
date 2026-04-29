@@ -1,13 +1,13 @@
 #!/bin/bash
 
-#SBATCH --job-name=ATPO_Training
+#SBATCH --job-name=ATPO_NQ_8B
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=48
 #SBATCH --mem=128G
 #SBATCH --gpus=8
 #SBATCH --time=48:00:00
-#SBATCH --qos=standard
+#SBATCH --qos=high
 #SBATCH --output=logs/slurm_%j.log
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') Job ${SLURM_JOB_ID} started ..."
@@ -64,9 +64,9 @@ fi
 
 # 3. Model specific settings
 if [ "$MODEL_ARG" == "qwen4b" ]; then
-    ACTOR_MODEL_PATH="${PROJECT_DIR}/models/Qwen3-4B"
+    ACTOR_MODEL_PATH="Qwen/Qwen3-4B"
 elif [ "$MODEL_ARG" == "qwen8b" ]; then
-    ACTOR_MODEL_PATH="${PROJECT_DIR}/models/Qwen3-8B"
+    ACTOR_MODEL_PATH="Qwen/Qwen3-8B"
 else
     echo "Error: Invalid model '$MODEL_ARG'. Must be 'qwen4b' or 'qwen8b'."
     exit 1
@@ -77,9 +77,9 @@ EXPERIMENT_NAME="${ALGO_ARG}_${DATASET_ARG}_${MODEL_ARG}"
 # ==========================================
 # Environment Setup
 # ==========================================
-ml CUDA/12.9.1
+# ml CUDA/12.9.1
 source ~/.bashrc
-conda activate atpo_env
+conda activate atpo
 
 export NCCL_DEBUG="WARN"
 export NCCL_P2P_DISABLE=0
@@ -114,10 +114,10 @@ export RAY_DASHBOARD_AGENT_ENABLED=0
 # ==========================================
 RAG_LOG="${PROJECT_DIR}/logs/rag_server_${SLURM_JOB_ID}.log"
 
-conda run -n retriever_env \
+conda run -n retriever \
     python rag_server/retrieval_server.py \
-    --index_path rag_data/e5_Flat.index \
-    --corpus_path rag_data/wiki-18.jsonl \
+    --index_path rag_server/index/e5_Flat.index \
+    --corpus_path rag_server/index/wiki-18.jsonl \
     --topk 3 \
     --retriever_model intfloat/e5-base-v2 \
     > "${RAG_LOG}" 2>&1 &
@@ -237,8 +237,10 @@ python3 -m verl.trainer.main_ppo \
     trainer.experiment_name=${EXPERIMENT_NAME} \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
-    trainer.save_freq=50 \
+    trainer.save_freq=20 \
     trainer.test_freq=10 \
+    trainer.max_actor_ckpt_to_keep=3 \
+    +actor_rollout_ref.actor.checkpoint.save_contents=["hf_model","extra"] \
     trainer.total_epochs=1 \
     trainer.default_local_dir=${SAVE_PATH} \
     trainer.val_before_train=True \
