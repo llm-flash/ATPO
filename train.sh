@@ -239,7 +239,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.nnodes=1 \
     trainer.save_freq=50 \
     trainer.test_freq=10 \
-    trainer.max_actor_ckpt_to_keep=3 \
+    trainer.max_actor_ckpt_to_keep=2 \
     +actor_rollout_ref.actor.checkpoint.save_contents=["hf_model","extra"] \
     trainer.total_epochs=1 \
     trainer.default_local_dir=${SAVE_PATH} \
