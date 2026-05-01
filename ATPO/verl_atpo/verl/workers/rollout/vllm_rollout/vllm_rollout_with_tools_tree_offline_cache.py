@@ -2109,7 +2109,7 @@ class vLLMRolloutWithTools(vLLMRollout):
                     global_steps = float(prompts.meta_info.get("global_steps", 1.0))
                     annealing_steps = max(float(self.annealing_steps), 1e-8)
                     progress = min(max(global_steps / annealing_steps, 0.0), 1.0)
-                    annealed_multiplier = 0.6 + 0.7 * (1.0 + np.cos(np.pi * progress)) / 2.0
+                    annealed_multiplier = 0.3 + 0.2 * (1.0 + np.cos(np.pi * progress)) / 2.0
                     annealed_multiplier = max(annealed_multiplier, 0.0)
                 else:
                     annealed_multiplier = 0.8 + 0.5*max(1 - prompts.meta_info.get("global_steps", 1.0)/self.annealing_steps, 0.0)**2
@@ -2138,7 +2138,7 @@ class vLLMRolloutWithTools(vLLMRollout):
                             elif self.entropy_mixing_method == 'additive':
                                 node.advantage = node.value + entropy_multiplier*node.entropy + curiosity_multiplier*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6)
                             elif self.entropy_mixing_method == 'no_entropy':
-                                node.advantage = node.value + annealed_multiplier*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6)
+                                node.advantage = node.value + annealed_multiplier*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6) + 0.5*node.entropy*(node.value - node.parent_node.value)
 
                 elif self.node_adv_mode == 'diff_parent':
                     print("Computing node advantages using diff_parent mode...")
