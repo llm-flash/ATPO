@@ -237,15 +237,7 @@ if __name__ == '__main__':
             return process_fn
 
         test_dataset = test_dataset.map(function=make_map_fn('test'), with_indices=True)
-        all_dataset.append(test_dataset)
 
-    local_dir = args.local_dir
-    hdfs_dir = args.hdfs_dir
+        local_dir = args.local_dir
 
-    all_test_dataset = datasets.concatenate_datasets(all_dataset)
-    all_test_dataset.to_parquet(os.path.join(local_dir, 'multihop_test_merged.parquet'))
-
-    if hdfs_dir is not None:
-        makedirs(hdfs_dir)
-
-        copy(src=local_dir, dst=hdfs_dir)
+        test_dataset.to_parquet(os.path.join(local_dir, f'{data_source}_test.parquet'))
