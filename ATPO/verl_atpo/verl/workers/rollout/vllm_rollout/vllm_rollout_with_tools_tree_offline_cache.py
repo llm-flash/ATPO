@@ -1202,6 +1202,21 @@ class vLLMRolloutWithTools(vLLMRollout):
         # the vllm inference engine
         assert len(contexts) == len(pseudo_responses) == len(gt_token_indices), "Length of contexts, pseudo_responses, and gt_token_indices must be the same"
         pseudo_rollouts = [contexts[i] + pseudo_responses[i] for i in range(len(contexts))]
+        # Do not try to get logprobs for tokens beyond the model's max length. If adding the pseudo-response exceeds max_model_len,
+        # just assign the parent node's gt_prob to this one
+        max_model_len = getattr(
+                    self.inference_engine.llm_engine.model_config,
+                    "max_model_len",
+                    8192,
+                )
+        rollouts_to_skip = []
+        for i in range(len(pseudo_rollouts)):
+            if len(pseudo_rollouts[i]) >= max_model_len:
+                logger.warning(f"Sample {i} exceeds max_model_len after adding pseudo-response, assigning parent gt_prob")
+                # We will still include this sample in the forward pass for simplicity, but we will ignore the logprobs
+                pseudo_rollouts[i] = pseudo_rollouts[i][:max_model_len-1]
+                rollouts_to_skip.append(i)
+            
         # NOTE: We are forced to generate a new token during this forward pass, but we ignore it and only use the prompt logprobs
         sampling_params = SamplingParams(
             max_tokens=1,
@@ -1223,6 +1238,9 @@ class vLLMRolloutWithTools(vLLMRollout):
         # TODO: vectorize this instead of using for loops
         gt_probs = []
         for i in range(len(pseudo_rollouts)):
+            if i in rollouts_to_skip:
+                gt_probs.append(None)
+                continue
             log_probs = []
             # gt_token_indices[i] gives us the indices of the tokens of interest in the pseudo-response,
                 # but we need to account for the length of the context
@@ -1278,7 +1296,12 @@ class vLLMRolloutWithTools(vLLMRollout):
             gt_token_indices = [node.pseudo_response_info[1] for node in current_nodes]
             gt_probs = self.get_ground_truth_probs(full_seq_no_pseudo_resp, pseudo_resps_with_gt, gt_token_indices)
             for node, gt_prob in zip(current_nodes, gt_probs):
-                node.gt_prob = gt_prob
+                if gt_prob is not None:
+                    node.gt_prob = gt_prob
+                elif node.parent_node is not None:
+                    node.gt_prob = node.parent_node.gt_prob
+                else:
+                    node.gt_prob = 0.0
 
         while current_nodes:
             iteration += 1
@@ -1312,7 +1335,12 @@ class vLLMRolloutWithTools(vLLMRollout):
                     gt_token_indices = [child_nodes[i].pseudo_response_info[1] for i in tool_result_node_indices]
                     gt_probs = self.get_ground_truth_probs(full_seq_no_pseudo_resp, pseudo_responses, gt_token_indices)
                     for idx, gt_prob in zip(tool_result_node_indices, gt_probs):
-                        child_nodes[idx].gt_prob = gt_prob
+                        if gt_prob is not None:
+                            child_nodes[idx].gt_prob = gt_prob
+                        elif child_nodes[idx].parent_node is not None:
+                            child_nodes[idx].gt_prob = child_nodes[idx].parent_node.gt_prob
+                        else:
+                            child_nodes[idx].gt_prob = 0.0
             
             # Filter child nodes by response length (similar to vllm_rollout_with_tools_tree.py)
             # Only keep nodes that haven't exceeded max_len after adding tool results
@@ -1658,7 +1686,12 @@ class vLLMRolloutWithTools(vLLMRollout):
                 gt_token_indices = [node.pseudo_response_info[1] for node in root_nodes]
                 gt_probs = self.get_ground_truth_probs(full_seq_no_pseudo_resp, pseudo_resps_with_gt, gt_token_indices)
                 for node, gt_prob in zip(root_nodes, gt_probs):
-                    node.gt_prob = gt_prob
+                    if gt_prob is not None:
+                        node.gt_prob = gt_prob
+                    elif node.parent_node is not None:
+                        node.gt_prob = node.parent_node.gt_prob
+                    else:
+                        node.gt_prob = 0.0
 
             total_roots = len(root_nodes)
             total_initial_branches = sum(len(root.child_nodes) for root in root_nodes)
