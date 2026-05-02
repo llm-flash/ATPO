@@ -208,6 +208,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+    actor_rollout_ref.rollout.val_kwargs.n=1 \
     actor_rollout_ref.rollout.enable_dynamic_rollouts=False \
     actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=$((4*(2000+6192))) \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
