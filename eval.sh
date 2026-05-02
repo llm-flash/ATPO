@@ -243,6 +243,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.n_gpus_per_node=${N_GPU_PER_NODE} \
     trainer.nnodes=1 \
     trainer.total_training_steps=1 \
+    trainer.val_only=True \
     trainer.save_freq=50 \
     trainer.test_freq=10 \
     trainer.default_local_dir=${SAVE_PATH} \
