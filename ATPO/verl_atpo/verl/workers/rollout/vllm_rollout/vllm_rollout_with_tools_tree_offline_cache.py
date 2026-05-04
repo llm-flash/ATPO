@@ -370,30 +370,56 @@ class ToolTreeNode:
                 return random.choices(candidate_nodes, k=n)
         
         elif mode == 'entropy':
-            # Calculate probability score for each node
+            # Counterfactual branching: prioritize nodes where the action reduced P(correct answer).
+            #
+            # We compute the log-ratio: log_drop = log(parent.gt_prob) - log(node.gt_prob)
+            #   - log_drop > 0 means the action HURT (gt_prob decreased) → counterfactual candidate
+            #   - log_drop <= 0 means the action HELPED (gt_prob same or increased) → use entropy
+            #
+            # The branching score is: max(min(log_drop, CAP), entropy) - DEPTH_PENALTY * depth
+            #   - CAP (0.7): prevents deep nodes with tiny gt_probs from dominating via inflated
+            #     log-ratios (e.g., 0.096→0.046 gives log_drop=0.74, comparable to 0.445→0.267=0.51).
+            #     Once capped, the depth penalty tiebreaks in favor of shallower (earlier) nodes,
+            #     so we branch at the FIRST harmful action rather than downstream consequences.
+            #   - DEPTH_PENALTY (0.01): small enough to not affect regime selection, but breaks ties
+            #     among capped nodes so shallower nodes (where the damage started) get priority.
+            #
+            # Typical value ranges (from training logs):
+            #   - entropy (mean NLL of sampled tokens): 0.15 - 0.65, most nodes 0.2 - 0.5
+            #   - log_drop when action hurt: 0.02 - 1.5 (capped to 0.7)
+            #   - log_drop when action helped: negative (ignored, falls to entropy)
+            #
+            # Effect:
+            #   - Bad trajectories: harmful nodes score ~0.7, entropy nodes score ~0.3 → branches
+            #     at the earliest pivot point where gt_prob first dropped.
+            #   - Good trajectories: no drops exceed entropy → pure entropy-based exploration.
+            LOG_DROP_CAP = 0.7
+            DEPTH_PENALTY = 0.01
+            GT_PROB_FLOOR = 0.01
+
             node_scores = []
             for node in candidate_nodes:
-                entropy_now = node.entropy
-                entropy_init = node.initial_entropy
-                entropy_delta = entropy_now - entropy_init
+                entropy_now = node.entropy if node.entropy is not None else 0.0
 
-                # Calculate base probability with random component and entropy delta
-                # prob = random.random() + entropy_weight * entropy_delta
-                # prob = entropy_weight * entropy_delta
-                prob = entropy_now
-                
-                # Apply node-level branch penalty based on existing children
-                # If a node has already been expanded (has children), penalize further expansion
+                if (node.parent_node is not None
+                        and node.gt_prob is not None
+                        and node.parent_node.gt_prob is not None):
+                    parent_gt = max(node.parent_node.gt_prob, GT_PROB_FLOOR)
+                    node_gt = max(node.gt_prob, GT_PROB_FLOOR)
+                    log_drop = np.log(parent_gt) - np.log(node_gt)
+                    log_drop = max(log_drop, 0.0)
+                    capped_drop = min(log_drop, LOG_DROP_CAP)
+                    prob = max(capped_drop, entropy_now) - DEPTH_PENALTY * node.depth
+                else:
+                    prob = entropy_now - DEPTH_PENALTY * node.depth
+
+                # Penalize nodes whose parent has already been expanded multiple times
                 if node.parent_node is None:
                     num_existing_branches = max(0, len(node.child_nodes) - 1)
                 else:
                     num_existing_branches = max(0, len(node.parent_node.child_nodes) - 1)
-                penalty_factor = 1.0 - 0.05 * num_existing_branches
-                # penalty_factor = max(0.0, penalty_factor)  # Ensure not negative
-                # prob = prob * penalty_factor
-                prob = prob-0.05*num_existing_branches
-                
-                
+                prob = prob - 0.05 * num_existing_branches
+
                 node_scores.append((node, prob))
             # print('node probs:', [node_score[1] for node_score in node_scores])
             # Sort nodes by probability score (high to low)
@@ -1213,10 +1239,9 @@ class vLLMRolloutWithTools(vLLMRollout):
         for i in range(len(pseudo_rollouts)):
             if len(pseudo_rollouts[i]) >= max_model_len:
                 logger.warning(f"Sample {i} exceeds max_model_len after adding pseudo-response, assigning parent gt_prob")
-                # We will still include this sample in the forward pass for simplicity, but we will ignore the logprobs
                 pseudo_rollouts[i] = pseudo_rollouts[i][:max_model_len-1]
                 rollouts_to_skip.append(i)
-            
+
         # NOTE: We are forced to generate a new token during this forward pass, but we ignore it and only use the prompt logprobs
         sampling_params = SamplingParams(
             max_tokens=1,
@@ -2094,7 +2119,7 @@ class vLLMRolloutWithTools(vLLMRollout):
                         # Collect leaf values
                         leaf_values = [leaf.value for leaf in tree_leaves if leaf.value is not None]
                         
-                        # Calculate mean and std
+                        # Calculate mean and std (floor std to prevent z-score explosion)
                         leaf_values_array = np.array(leaf_values)
                         mean_value = np.mean(leaf_values_array)
                         std_value = np.std(leaf_values_array)
@@ -2142,7 +2167,7 @@ class vLLMRolloutWithTools(vLLMRollout):
                     global_steps = float(prompts.meta_info.get("global_steps", 1.0))
                     annealing_steps = max(float(self.annealing_steps), 1e-8)
                     progress = min(max(global_steps / annealing_steps, 0.0), 1.0)
-                    annealed_multiplier = 0.4 + 0.3 * (1.0 + np.cos(np.pi * progress)) / 2.0
+                    annealed_multiplier = 0.2 + 0.3 * (1.0 + np.cos(np.pi * progress)) / 2.0
                     annealed_multiplier = max(annealed_multiplier, 0.0)
                 else:
                     annealed_multiplier = 0.8 + 0.5*max(1 - prompts.meta_info.get("global_steps", 1.0)/self.annealing_steps, 0.0)**2
@@ -2174,7 +2199,10 @@ class vLLMRolloutWithTools(vLLMRollout):
                                 if node.is_root:
                                     node.advantage = node.value 
                                 else:
-                                    node.advantage = node.value + annealed_multiplier*node.entropy*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6) + 0.5*node.entropy*(node.value - node.parent_node.value)
+                                    # node.advantage = node.value + annealed_multiplier*(node.curiosity - avg_curiosity) / (stdev_curiosity + 1e-6) + 0.2*node.entropy*(node.value - node.parent_node.value)
+                                    node.advantage = node.value + 0.5*node.entropy*(node.value - node.parent_node.value)
+
+                            # node.advantage = np.clip(node.advantage, -6.0, 6.0)
 
                 elif self.node_adv_mode == 'diff_parent':
                     print("Computing node advantages using diff_parent mode...")
@@ -2251,6 +2279,7 @@ class vLLMRolloutWithTools(vLLMRollout):
                             # Assign node's value and advantage to these tokens
                             token_level_scores[i, start_idx:end_idx] = node.value
                             token_level_advantages[i, start_idx:end_idx] = node.advantage / len(node.get_all_leaves())
+                            # token_level_advantages[i, start_idx:end_idx] = node.advantage
                             
                             logger.debug(f"Leaf {i}, Node {node.node_uid}: assigned value={node.value:.4f}, adv={node.advantage:.4f} to tokens [{start_idx}:{end_idx}]")
 
