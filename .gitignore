@@ -22,3 +22,4 @@ search_cache/
 slurm-*.out
 slurm-*.err
 rag_server_*.log
+__pycache__
