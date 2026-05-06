@@ -32,14 +32,14 @@ echo "Project directory set to: $PROJECT_DIR"
 
 # 1. Algorithm specific settings
 if [ "$ALGO_ARG" == "cache" ]; then
-    PROJECT_NAME="CACHE"
+    PROJECT_NAME="Neurips-final-runs"
     ROLLOUT_MODE="sync_with_tool_tree_cache"
     EXPANSION_MODE="entropy"
     NODE_VALUE_MODE="child_mean"
     SEARCH_CACHE_PATH="${PROJECT_DIR}/search_cache/search_cache_entropy_branch.json"
     EXTRA_TOOL_ARGS="actor_rollout_ref.rollout.tools.call_limit=6"
 elif [ "$ALGO_ARG" == "atpo" ]; then
-    PROJECT_NAME="ATPO"
+    PROJECT_NAME="Neurips-final-runs"
     ROLLOUT_MODE="sync_with_tool_tree"
     EXPANSION_MODE="entropy"
     NODE_VALUE_MODE="child_softmax"
@@ -247,6 +247,8 @@ python3 -m verl.trainer.main_ppo \
     trainer.rollout_data_dir="${SAVE_PATH}/rollout" \
     trainer.validation_data_dir="${SAVE_PATH}/validation" \
     ray_init.num_cpus=null \
+    trainer.resume_mode="resume_path" \
+    trainer.resume_from_path="${PROJECT_DIR}/logs/atpo-qwen3-8b-hotpotqa-step200" \
     hydra.run.dir="${SAVE_PATH}/outputs" 2>&1 | tee "${SAVE_PATH}/run.log"
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') Job ${SLURM_JOB_ID} stopped ..."
