@@ -16,17 +16,14 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') Job ${SLURM_JOB_ID} started ..."
 # ==========================================
 # Parse Arguments
 # ==========================================
-if [ "$#" -ne 4 ]; then
-    echo "Usage: sbatch $0 <algorithm: atpo|cache> <dataset: hotpotqa|nq> <base_model> <checkpoint_path>"
+if [ "$#" -ne 3 ]; then
+    echo "Usage: sbatch $0 <algorithm: atpo|cache> <dataset: hotpotqa|nq> <checkpoint_path>"
     exit 1
 fi
-# base_model should be "Qwen/Qwen3-4B" or "Qwen/Qwen3-8B"
-# Make sure checkpoint name does not end in /
 
 ALGO_ARG=$(echo "$1" | tr '[:upper:]' '[:lower:]')
 DATASET_ARG=$(echo "$2" | tr '[:upper:]' '[:lower:]')
-MODEL_ARG=$(echo "$3" | tr '[:upper:]' '[:lower:]')
-CHECKPOINT_PATH=$(echo "$4" | sed 's:/*$::')
+CHECKPOINT_PATH=$(echo "$3" | sed 's:/*$::')
 
 # ==========================================
 # Resolve Relative Directories
@@ -38,41 +35,45 @@ cd "$PARENT_DIR"
 echo "Switched to parent directory: $PARENT_DIR"
 echo "Project directory set to: $PROJECT_DIR"
 
+PROJECT_NAME="CACHE_eval"
+
 # 1. Algorithm specific settings
 if [ "$ALGO_ARG" == "cache" ]; then
-    PROJECT_NAME="CACHE_eval"
     ROLLOUT_MODE="sync_with_tool_tree_cache"
     EXPANSION_MODE="entropy"
     NODE_VALUE_MODE="child_mean"
     SEARCH_CACHE_PATH="${PROJECT_DIR}/search_cache/search_cache_entropy_branch.json"
-    EXTRA_TOOL_ARGS="actor_rollout_ref.rollout.tools.call_limit=3"
+    EXTRA_TOOL_ARGS="actor_rollout_ref.rollout.tools.call_limit=6"
 elif [ "$ALGO_ARG" == "atpo" ]; then
-    PROJECT_NAME="ATPO_eval"
     ROLLOUT_MODE="sync_with_tool_tree"
     EXPANSION_MODE="entropy"
     NODE_VALUE_MODE="child_softmax"
     SEARCH_CACHE_PATH="${PROJECT_DIR}/search_cache/search_cache.json"
-    EXTRA_TOOL_ARGS=""
+    EXTRA_TOOL_ARGS="actor_rollout_ref.rollout.tools.call_limit=6"
 else
     echo "Error: Invalid algorithm '$ALGO_ARG'. Must be 'atpo' or 'cache'."
     exit 1
 fi
 
 # 2. Dataset specific settings
+# Due to differences in the columns used for these datasets, I cannot include hotpotqa and the others all at once
 if [ "$DATASET_ARG" == "hotpotqa" ]; then
     TRAIN_FILES="${PROJECT_DIR}/rl_datasets/hotpotqa/train.parquet"
-    VALID_FILES="[\"${PROJECT_DIR}/rl_datasets/multihop_test_merged.parquet\"]"
+    VALID_FILES="[\"${PROJECT_DIR}/rl_datasets/hotpotqa_test.parquet\"]"
+    # VALID_FILES="[\"${PROJECT_DIR}/rl_datasets/2wikimultihopqa_test.parquet\",\"${PROJECT_DIR}/rl_datasets/bamboogle_test.parquet\",\"${PROJECT_DIR}/rl_datasets/musique_test.parquet\"]"
+elif [ "$DATASET_ARG" == "other_multihop" ]; then
+    TRAIN_FILES="${PROJECT_DIR}/rl_datasets/hotpotqa/train.parquet"
+    VALID_FILES="[\"${PROJECT_DIR}/rl_datasets/2wikimultihopqa_test.parquet\",\"${PROJECT_DIR}/rl_datasets/bamboogle_test.parquet\",\"${PROJECT_DIR}/rl_datasets/musique_test.parquet\"]"
 elif [ "$DATASET_ARG" == "nq" ]; then
     TRAIN_FILES="${PROJECT_DIR}/rl_datasets/nq/train.parquet"
-    VALID_FILES="[\"${PROJECT_DIR}/rl_datasets/singlehop_test_merged.parquet\"]"
+    VALID_FILES="[\"${PROJECT_DIR}/rl_datasets/nq_test.parquet\",\"${PROJECT_DIR}/rl_datasets/popqa_test.parquet\",\"${PROJECT_DIR}/rl_datasets/triviaqa_test.parquet\"]"
 else
     echo "Error: Invalid dataset '$DATASET_ARG'. Must be 'hotpotqa' or 'nq'."
     exit 1
 fi
 
-ACTOR_MODEL_PATH="${MODEL_ARG}"
+ACTOR_MODEL_PATH="${CHECKPOINT_PATH}"
 RESUME_MODE="resume_path"
-RESUME_FROM_PATH="${CHECKPOINT_PATH}"
 
 EXPERIMENT_NAME="${ALGO_ARG}_${DATASET_ARG}_EVAL"
 
@@ -248,8 +249,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.test_freq=10 \
     trainer.default_local_dir=${SAVE_PATH} \
     trainer.val_before_train=True \
-    trainer.resume_mode=${RESUME_MODE} \
-    trainer.resume_from_path=${RESUME_FROM_PATH} \
     trainer.rollout_data_dir="${SAVE_PATH}/rollout" \
     trainer.validation_data_dir="${SAVE_PATH}/validation" \
     ray_init.num_cpus=null \
