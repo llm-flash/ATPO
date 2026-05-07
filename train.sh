@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=ATPO_Training
+#SBATCH --job-name=TreeHCA_Training
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=48
@@ -16,7 +16,7 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') Job ${SLURM_JOB_ID} started ..."
 # Parse Arguments
 # ==========================================
 if [ "$#" -ne 3 ]; then
-    echo "Usage: sbatch $0 <algorithm: atpo|cache> <dataset: hotpotqa|nq> <model: qwen4b|qwen8b>"
+    echo "Usage: sbatch $0 <algorithm: atpo|treehca> <dataset: hotpotqa|nq> <model: qwen4b|qwen8b>"
     exit 1
 fi
 
@@ -31,12 +31,12 @@ PROJECT_DIR="$SLURM_SUBMIT_DIR"
 echo "Project directory set to: $PROJECT_DIR"
 
 # 1. Algorithm specific settings
-if [ "$ALGO_ARG" == "cache" ]; then
-    PROJECT_NAME="CACHE"
-    ROLLOUT_MODE="sync_with_tool_tree_cache"
+if [ "$ALGO_ARG" == "treehca" ]; then
+    PROJECT_NAME="TreeHCA"
+    ROLLOUT_MODE="sync_with_tool_tree_treehca"
     EXPANSION_MODE="entropy"
     NODE_VALUE_MODE="child_mean"
-    SEARCH_CACHE_PATH="${PROJECT_DIR}/search_cache/search_cache_entropy_branch.json"
+    SEARCH_CACHE_PATH="${PROJECT_DIR}/search_cache/search_cache.json"
     EXTRA_TOOL_ARGS="actor_rollout_ref.rollout.tools.call_limit=6"
 elif [ "$ALGO_ARG" == "atpo" ]; then
     PROJECT_NAME="ATPO"
@@ -46,7 +46,7 @@ elif [ "$ALGO_ARG" == "atpo" ]; then
     SEARCH_CACHE_PATH="${PROJECT_DIR}/search_cache/search_cache.json"
     EXTRA_TOOL_ARGS="actor_rollout_ref.rollout.tools.call_limit=6"
 else
-    echo "Error: Invalid algorithm '$ALGO_ARG'. Must be 'atpo' or 'cache'."
+    echo "Error: Invalid algorithm '$ALGO_ARG'. Must be 'atpo' or 'treehca'."
     exit 1
 fi
 
@@ -79,7 +79,7 @@ EXPERIMENT_NAME="${ALGO_ARG}_${DATASET_ARG}_${MODEL_ARG}"
 # ==========================================
 ml CUDA/12.9.1
 source ~/.bashrc
-conda activate atpo_env
+conda activate treehca_env
 
 export NCCL_DEBUG="WARN"
 export NCCL_P2P_DISABLE=0
@@ -93,7 +93,7 @@ export MKL_THREADING_LAYER=GNU
 export RAY_memory_usage_threshold=0.8  
 export RAY_memory_monitor_refresh_ms=0 
 export RAY_DEBUG=1
-export PYTHONPATH=${PROJECT_DIR}/ATPO/verl_atpo:$PYTHONPATH
+export PYTHONPATH=${PROJECT_DIR}/TreeHCA/verl_treehca:$PYTHONPATH
 
 # ==========================================
 # Ray Environment Preparation
@@ -177,7 +177,7 @@ mkdir -p "$SAVE_PATH/validation"
 echo "Starting $PROJECT_NAME training ($EXPERIMENT_NAME)..."
 
 python3 -m verl.trainer.main_ppo \
-    --config-path="${PROJECT_DIR}/ATPO/scripts/config" \
+    --config-path="${PROJECT_DIR}/TreeHCA/scripts/config" \
     --config-name="ppo_trainer_dr.yaml" \
     algorithm.adv_estimator=grpo \
     algorithm.kl_ctrl.kl_coef=0.0 \
@@ -225,11 +225,11 @@ python3 -m verl.trainer.main_ppo \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.cache_file=${SEARCH_CACHE_PATH} \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.api_key="unused_local_rag_server" \
     actor_rollout_ref.rollout.multi_turn.enable=True \
-    actor_rollout_ref.rollout.multi_turn.tool_config_path="${PROJECT_DIR}/ATPO/verl_atpo/examples/sglang_multiturn/config/tool_config/search_tool_config.yaml" \
+    actor_rollout_ref.rollout.multi_turn.tool_config_path="${PROJECT_DIR}/TreeHCA/verl_treehca/examples/sglang_multiturn/config/tool_config/search_tool_config.yaml" \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=$((4*(2000+6192))) \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     reward_model.reward_manager="naive" \
-    custom_reward_function.path="${PROJECT_DIR}/ATPO/verl_atpo/verl/utils/reward_score/deep_research_em.py" \
+    custom_reward_function.path="${PROJECT_DIR}/TreeHCA/verl_treehca/verl/utils/reward_score/deep_research_em.py" \
     custom_reward_function.name="compute_score" \
     trainer.critic_warmup=0 \
     trainer.logger="[console, wandb]" \

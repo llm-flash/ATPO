@@ -1,13 +1,12 @@
 #!/bin/bash
 
-#SBATCH --job-name=ATPO_Training
+#SBATCH --job-name=TreeHCA_Training
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=48
 #SBATCH --mem=128G
 #SBATCH --gpus=8
 #SBATCH --time=4:00:00
-#SBATCH --account=early-adopters
 #SBATCH --qos=standard
 #SBATCH --output=logs/slurm_%j.log
 
@@ -17,7 +16,7 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') Job ${SLURM_JOB_ID} started ..."
 # Parse Arguments
 # ==========================================
 if [ "$#" -ne 3 ]; then
-    echo "Usage: sbatch $0 <algorithm: atpo|cache> <dataset: hotpotqa|nq> <checkpoint_path>"
+    echo "Usage: sbatch $0 <algorithm: atpo|treehca> <dataset: hotpotqa|nq> <checkpoint_path>"
     exit 1
 fi
 
@@ -28,39 +27,33 @@ CHECKPOINT_PATH=$(echo "$3" | sed 's:/*$::')
 # ==========================================
 # Resolve Relative Directories
 # ==========================================
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-PARENT_DIR="$(dirname "$SCRIPT_DIR")"
-PROJECT_DIR="$(dirname "$PARENT_DIR")"
-cd "$PARENT_DIR"
-echo "Switched to parent directory: $PARENT_DIR"
+PROJECT_DIR="$SLURM_SUBMIT_DIR"
 echo "Project directory set to: $PROJECT_DIR"
 
-PROJECT_NAME="CACHE_eval"
-
 # 1. Algorithm specific settings
-if [ "$ALGO_ARG" == "cache" ]; then
-    ROLLOUT_MODE="sync_with_tool_tree_cache"
+if [ "$ALGO_ARG" == "treehca" ]; then
+    PROJECT_NAME="TreeHCA_eval"
+    ROLLOUT_MODE="sync_with_tool_tree_treehca"
     EXPANSION_MODE="entropy"
     NODE_VALUE_MODE="child_mean"
-    SEARCH_CACHE_PATH="${PROJECT_DIR}/search_cache/search_cache_entropy_branch.json"
+    SEARCH_CACHE_PATH="${PROJECT_DIR}/search_cache/search_cache.json"
     EXTRA_TOOL_ARGS="actor_rollout_ref.rollout.tools.call_limit=6"
 elif [ "$ALGO_ARG" == "atpo" ]; then
+    PROJECT_NAME="ATPO_eval"
     ROLLOUT_MODE="sync_with_tool_tree"
     EXPANSION_MODE="entropy"
     NODE_VALUE_MODE="child_softmax"
     SEARCH_CACHE_PATH="${PROJECT_DIR}/search_cache/search_cache.json"
     EXTRA_TOOL_ARGS="actor_rollout_ref.rollout.tools.call_limit=6"
 else
-    echo "Error: Invalid algorithm '$ALGO_ARG'. Must be 'atpo' or 'cache'."
+    echo "Error: Invalid algorithm '$ALGO_ARG'. Must be 'atpo' or 'treehca'."
     exit 1
 fi
 
 # 2. Dataset specific settings
-# Due to differences in the columns used for these datasets, I cannot include hotpotqa and the others all at once
 if [ "$DATASET_ARG" == "hotpotqa" ]; then
     TRAIN_FILES="${PROJECT_DIR}/rl_datasets/hotpotqa/train.parquet"
     VALID_FILES="[\"${PROJECT_DIR}/rl_datasets/hotpotqa_test.parquet\"]"
-    # VALID_FILES="[\"${PROJECT_DIR}/rl_datasets/2wikimultihopqa_test.parquet\",\"${PROJECT_DIR}/rl_datasets/bamboogle_test.parquet\",\"${PROJECT_DIR}/rl_datasets/musique_test.parquet\"]"
 elif [ "$DATASET_ARG" == "other_multihop" ]; then
     TRAIN_FILES="${PROJECT_DIR}/rl_datasets/hotpotqa/train.parquet"
     VALID_FILES="[\"${PROJECT_DIR}/rl_datasets/2wikimultihopqa_test.parquet\",\"${PROJECT_DIR}/rl_datasets/bamboogle_test.parquet\",\"${PROJECT_DIR}/rl_datasets/musique_test.parquet\"]"
@@ -72,8 +65,8 @@ else
     exit 1
 fi
 
+# 3. Model specific settings
 ACTOR_MODEL_PATH="${CHECKPOINT_PATH}"
-RESUME_MODE="resume_path"
 
 EXPERIMENT_NAME="${ALGO_ARG}_${DATASET_ARG}_EVAL"
 
@@ -82,14 +75,13 @@ EXPERIMENT_NAME="${ALGO_ARG}_${DATASET_ARG}_EVAL"
 # ==========================================
 ml CUDA/12.9.1
 source ~/.bashrc
-conda activate atpo_env
+conda activate treehca_env
 
 export NCCL_DEBUG="WARN"
 export NCCL_P2P_DISABLE=0
 export NCCL_IB_DISABLE=1
 export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-N_GPU_PER_NODE=8
 export VLLM_ATTENTION_BACKEND=FLASH_ATTN 
 export VERL_LOGGING_LEVEL=WARN
 export MKL_SERVICE_FORCE_INTEL=1    
@@ -97,7 +89,7 @@ export MKL_THREADING_LAYER=GNU
 export RAY_memory_usage_threshold=0.8  
 export RAY_memory_monitor_refresh_ms=0 
 export RAY_DEBUG=1
-export PYTHONPATH=${PARENT_DIR}/verl_atpo:$PYTHONPATH
+export PYTHONPATH=${PROJECT_DIR}/TreeHCA/verl_treehca:$PYTHONPATH
 
 # ==========================================
 # Ray Environment Preparation
@@ -116,7 +108,7 @@ export RAY_DASHBOARD_AGENT_ENABLED=0
 # ==========================================
 # Start Background RAG Server
 # ==========================================
-RAG_LOG="logs/rag_server_${SLURM_JOB_ID}.log"
+RAG_LOG="${PROJECT_DIR}/logs/rag_server_${SLURM_JOB_ID}.log"
 
 conda run -n retriever_env \
     python rag_server/retrieval_server.py \
@@ -181,7 +173,7 @@ mkdir -p "$SAVE_PATH/validation"
 echo "Starting $PROJECT_NAME training ($EXPERIMENT_NAME)..."
 
 python3 -m verl.trainer.main_ppo \
-    --config-path="${PARENT_DIR}/scripts/config" \
+    --config-path="${PROJECT_DIR}/TreeHCA/scripts/config" \
     --config-name="ppo_trainer_dr.yaml" \
     algorithm.adv_estimator=grpo \
     algorithm.kl_ctrl.kl_coef=0.0 \
@@ -231,22 +223,22 @@ python3 -m verl.trainer.main_ppo \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.cache_file=${SEARCH_CACHE_PATH} \
     ++actor_rollout_ref.rollout.tools.tool_instances.search.params.api_key="unused_local_rag_server" \
     actor_rollout_ref.rollout.multi_turn.enable=True \
-    actor_rollout_ref.rollout.multi_turn.tool_config_path="${PARENT_DIR}/verl_atpo/examples/sglang_multiturn/config/tool_config/search_tool_config.yaml" \
+    actor_rollout_ref.rollout.multi_turn.tool_config_path="${PROJECT_DIR}/TreeHCA/verl_treehca/examples/sglang_multiturn/config/tool_config/search_tool_config.yaml" \
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=$((4*(2000+6192))) \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     reward_model.reward_manager="naive" \
-    custom_reward_function.path="${PARENT_DIR}/verl_atpo/verl/utils/reward_score/deep_research_em.py" \
+    custom_reward_function.path="${PROJECT_DIR}/TreeHCA/verl_treehca/verl/utils/reward_score/deep_research_em.py" \
     custom_reward_function.name="compute_score" \
     trainer.critic_warmup=0 \
     trainer.logger="[console, wandb]" \
     trainer.project_name=${PROJECT_NAME} \
     trainer.experiment_name=${EXPERIMENT_NAME} \
-    trainer.n_gpus_per_node=${N_GPU_PER_NODE} \
+    trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
-    trainer.total_training_steps=1 \
-    +trainer.val_only=True \
     trainer.save_freq=50 \
     trainer.test_freq=10 \
+    trainer.total_training_steps=1 \
+    +trainer.val_only=True \
     trainer.default_local_dir=${SAVE_PATH} \
     trainer.val_before_train=True \
     trainer.rollout_data_dir="${SAVE_PATH}/rollout" \

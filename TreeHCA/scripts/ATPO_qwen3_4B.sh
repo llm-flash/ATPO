@@ -38,7 +38,7 @@ export RAY_memory_monitor_refresh_ms=0
 export RAY_DEBUG=1
 
 # Set Python path
-export PYTHONPATH=${PARENT_DIR}/verl_atpo:$PYTHONPATH
+export PYTHONPATH=${PARENT_DIR}/verl_treehca:$PYTHONPATH
 
 # ============================ Basic Configuration ============================
 # Experiment name and project
@@ -89,7 +89,7 @@ ROLLOUT_N=$SAMPLES_PER_TREE          # Number of responses generated per sample
 # ============================ Reward Model Configuration ==========================
 # Reward model settings
 REWARD_MANAGER="naive"              # Reward manager type
-CUSTOM_REWARD_FUNCTION_PATH="${PARENT_DIR}/verl_atpo/verl/utils/reward_score/deep_research_em.py"
+CUSTOM_REWARD_FUNCTION_PATH="${PARENT_DIR}/verl_treehca/verl/utils/reward_score/deep_research_em.py"
 CUSTOM_REWARD_FUNCTION_NAME="compute_score"
 
 # ============================ Training Configuration ============================
