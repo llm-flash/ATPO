@@ -217,6 +217,42 @@ def load_prompt_records(path: str | None) -> list[dict[str, Any]]:
         return [{"prompt": line.strip()} for i, line in enumerate(f) if line.strip()]
 
 
+def split_records_by_truncation_point(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expand each prompt into variants ending at assistant/result boundaries."""
+    split_records: list[dict[str, Any]] = []
+    assistant_sep = "assistant\n"
+    result_tag = "</result>"
+
+    for source_index, record in enumerate(records):
+        prompt = record.get("prompt", "")
+        assistant_start = prompt.find(assistant_sep)
+
+        if assistant_start == -1:
+            truncated = deepcopy(record)
+            truncated["source_record_id"] = record.get("id", source_index)
+            truncated["truncation_point"] = None
+            split_records.append(truncated)
+            continue
+
+        cut_points = [assistant_start + len(assistant_sep)]
+        search_from = cut_points[0]
+        while True:
+            result_start = prompt.find(result_tag, search_from)
+            if result_start == -1:
+                break
+            cut_points.append(result_start + len(result_tag))
+            search_from = result_start + len(result_tag)
+
+        for truncation_point, cut_point in enumerate(cut_points, start=1):
+            truncated = deepcopy(record)
+            truncated["prompt"] = prompt[:cut_point]
+            truncated["source_record_id"] = record.get("id", source_index)
+            truncated["truncation_point"] = truncation_point
+            split_records.append(truncated)
+
+    return split_records
+
+
 def modify_prompt(record: dict[str, Any], direct_answer: str | None = None, direct_response: str | None = None) -> dict[str, Any]:
     """Remove all but the final <search>/<result> blocks from the assistant section.
 
@@ -373,7 +409,7 @@ def main() -> None:
     else:
         rollout.inference_engine.wake_up()
 
-    records = load_prompt_records(args.prompts_file)[: args.num_prompts]
+    records = split_records_by_truncation_point(load_prompt_records(args.prompts_file)[: args.num_prompts])
     output_path = Path(args.output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -397,6 +433,8 @@ def main() -> None:
                     json.dumps(
                         {
                             "id": start + i,
+                            "source_record_id": record.get("source_record_id", start + i),
+                            "truncation_point": record.get("truncation_point"),
                             "original_prompt": record["prompt"],
                             "modified_prompt": modified_record["prompt"],
                             "gt_probs": {"direct": direct_result["ground_truth_prob"], "modified": modified_result["ground_truth_prob"]},
@@ -415,56 +453,93 @@ def main() -> None:
 
 def _print_statistics(output_path: Path, breakdown_by_id: bool = False) -> None:
     """Read the output JSONL and compare direct vs. modified gt_probs."""
+    total_rows = 0
     total_changed = 0
     total_direct_prob = 0.0
     total_modified_prob = 0.0
     total_diff = 0.0
     per_id_rows: list[dict[str, Any]] = []
+    by_truncation_point: dict[Any, dict[str, float]] = {}
 
     with output_path.open() as f:
         for total, line in enumerate(f):
             rec = json.loads(line)
             sample_id = rec.get("id", total)
-
-            if not rec.get("changed", 0):
-                continue
+            truncation_point = rec.get("truncation_point")
+            stats = by_truncation_point.setdefault(
+                truncation_point,
+                {"rows": 0, "changed": 0, "direct": 0.0, "modified": 0.0, "diff": 0.0},
+            )
+            stats["rows"] += 1
+            total_rows += 1
 
             gt_probs = rec.get("gt_probs", {})
             direct_prob = float(gt_probs.get("direct", 0.0))
             modified_prob = float(gt_probs.get("modified", 0.0))
             diff = modified_prob - direct_prob
+            stats['direct'] += direct_prob
+            stats['modified'] += modified_prob
+            stats['diff'] += diff
+
+            if not rec.get("changed", 0):
+                continue
 
             total_changed += 1
             total_direct_prob += direct_prob
             total_modified_prob += modified_prob
             total_diff += diff
+            stats["changed"] += 1
 
             if breakdown_by_id:
                 per_id_rows.append(
                     {
                         "id": sample_id,
+                        "source_record_id": rec.get("source_record_id"),
+                        "truncation_point": truncation_point,
                         "direct_prob": direct_prob,
                         "modified_prob": modified_prob,
                         "diff": diff,
                     }
                 )
 
-    if total_changed == 0:
-        print("No changed samples to compute statistics.")
+    if total_rows == 0:
+        print("No samples to compute statistics.")
         return
 
     print("\n" + "=" * 60)
     print("STATISTICS")
     print("=" * 60)
+    print(f"Samples: {total_rows}")
     print(f"Changed samples: {total_changed}")
-    print(f"Average direct gt_prob: {total_direct_prob / total_changed}")
-    print(f"Average modified gt_prob: {total_modified_prob / total_changed}")
-    print(f"Average difference (modified - direct): {total_diff / total_changed}")
+    if total_changed > 0:
+        print(f"Average direct gt_prob: {total_direct_prob / total_changed}")
+        print(f"Average modified gt_prob: {total_modified_prob / total_changed}")
+        print(f"Average difference (modified - direct): {total_diff / total_changed}")
+    else:
+        print("No changed samples to compute direct/modified averages.")
+
+    print("\nBY TRUNCATION POINT")
+    print("=" * 60)
+    for truncation_point in sorted(by_truncation_point, key=lambda point: (point is None, point)):
+        stats = by_truncation_point[truncation_point]
+        row_count = int(stats["rows"])
+        changed = int(stats["changed"])
+        label = "None" if truncation_point is None else str(truncation_point)
+        print(
+            f"truncation_point={label}: samples={row_count}, changed={changed}, "
+            f"direct={stats['direct'] / row_count}, modified={stats['modified'] / row_count}, "
+            f"diff={stats['diff'] / row_count}"
+        )
+
     if breakdown_by_id:
         print("\nBY ID")
         print("=" * 60)
         for row in per_id_rows:
-            print(f"id={row['id']}: direct={row['direct_prob']}, modified={row['modified_prob']}, diff={row['diff']}")
+            print(
+                f"id={row['id']} source_record_id={row['source_record_id']} "
+                f"truncation_point={row['truncation_point']}: direct={row['direct_prob']}, "
+                f"modified={row['modified_prob']}, diff={row['diff']}"
+            )
     print("=" * 60 + "\n")
 
 # NOTE: This function is actually necessary to avoid a raw_delete error from CUDAPluggableAllocator.cpp
