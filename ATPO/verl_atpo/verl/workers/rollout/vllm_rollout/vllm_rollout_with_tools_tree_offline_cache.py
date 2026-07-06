@@ -1226,7 +1226,10 @@ class vLLMRolloutWithTools(vLLMRollout):
         ### Add the ground-truth answers at the end of each sequence
         # At this point, contexts and pseudo_responses are both lists of lists which is a format accepted by
         # the vllm inference engine
-        assert len(contexts) == len(pseudo_responses) == len(gt_token_indices), "Length of contexts, pseudo_responses, and gt_token_indices must be the same"
+        if self.gt_prob_debug_checks:
+            assert len(contexts) == len(pseudo_responses) == len(gt_token_indices), "Length of contexts, pseudo_responses, and gt_token_indices must be the same"
+        if type(contexts[0]) is torch.Tensor:
+            contexts = [c.tolist() for c in contexts]
         pseudo_rollouts = [contexts[i] + pseudo_responses[i] for i in range(len(contexts))]
         # Do not try to get logprobs for tokens beyond the model's max length. If adding the pseudo-response exceeds max_model_len,
         # just assign the parent node's gt_prob to this one
