@@ -1214,10 +1214,12 @@ class RayPPOTrainer:
                     rollout_data_dir = self.config.trainer.get("rollout_data_dir", None)
                     if rollout_data_dir:
                         with _timer("dump_rollout_generations", timing_raw):
-                            print(batch.batch.keys())
-                            inputs = self.tokenizer.batch_decode(batch.batch["prompts"], skip_special_tokens=True)
-                            outputs = self.tokenizer.batch_decode(batch.batch["responses"], skip_special_tokens=True)
+                            inputs = self.tokenizer.batch_decode(batch.batch["prompts"], skip_special_tokens=False)
+                            inputs = [inp.replace("<|endoftext|>", "") for inp in inputs]
+                            outputs = self.tokenizer.batch_decode(batch.batch["responses"], skip_special_tokens=False)
+                            outputs = [out.replace("<|endoftext|>", "") for out in outputs]
                             scores = batch.batch["token_level_scores"].sum(-1).cpu().tolist()
+                            reward_extra_infos_dict["ground_truth"] = batch.non_tensor_batch.get("ground_truth", None)
                             self._dump_generations(
                                 inputs=inputs,
                                 outputs=outputs,
